@@ -114,19 +114,6 @@ struct tok_t *rd_tok(struct rd_t *rd)
 
 	if(rd->ch == EOF)
 		*tok = tok_new(TOK_EOF, strdup(""), loc);
-	else if(ch_id(rd->ch)) {
-		char *str = malloc(32);
-		uint32_t len = 0, max = 32;
-
-		do
-			str_add(&str, &len, &max, rd->ch);
-		while(ch_id(rd_ch(rd)));
-
-		str_add(&str, &len, &max, '\0');
-		str = realloc(str, len);
-
-		*tok = tok_new(TOK_ID, str, loc);
-	}
 	else if(rd->ch == '\'') {
 		char add, *str = malloc(32);
 		uint32_t len = 0, max = 32;
@@ -178,13 +165,14 @@ struct tok_t *rd_tok(struct rd_t *rd)
 				case 'v': add = '\v'; break;
 				case 'r': add = '\r'; break;
 				case 'n': add = '\n'; break;
+				case '$': add = '$'; break;
 				default: loc_err(rd->loc, "Unknown escape '\\%c'.", rd->ch);
 				}
+
+				str_add(&str, &len, &max, add);
 			}
 			else
-				add = rd->ch;
-
-			str_add(&str, &len, &max, add);
+				str_add(&str, &len, &max, rd->ch);
 		}
 
 		rd_ch(rd);
@@ -192,6 +180,19 @@ struct tok_t *rd_tok(struct rd_t *rd)
 		str = realloc(str, len);
 
 		*tok = tok_new(TOK_STR, str, loc);
+	}
+	else if(ch_id(rd->ch)) {
+		char *str = malloc(32);
+		uint32_t len = 0, max = 32;
+
+		do
+			str_add(&str, &len, &max, rd->ch);
+		while(ch_id(rd_ch(rd)));
+
+		str_add(&str, &len, &max, '\0');
+		str = realloc(str, len);
+
+		*tok = tok_new(TOK_ID, str, loc);
 	}
 	else {
 		uint32_t id = 0;
@@ -383,7 +384,7 @@ bool ch_alnum(int ch)
  */
 bool ch_id(int ch)
 {
-	return !ch_space(ch) && (ch != '{') && (ch != '}') && (ch != ':') && (ch != ';');
+	return !ch_space(ch) && (ch != '{') && (ch != '}') && (ch != ':') && (ch != ';') && (ch != '=');
 }
 
 

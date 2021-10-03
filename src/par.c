@@ -17,9 +17,9 @@ void par_top(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 
 		if(tok->id == TOK_ID) {
 			if(strcmp(tok->str, "print") == 0)
-				par_print(rd, ns);
+				par_print(rd, ctx, ns);
 			else if(rd_get(rd, 1)->id == '=')
-				par_assign(rd, ns);
+				par_assign(rd, ctx, ns);
 			else if(rd_get(rd, 1)->id == ':')
 				par_rule(rd, ctx, ns);
 			else
@@ -86,6 +86,12 @@ void par_rule(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 	ctx_rule(ctx, NULL, gens, deps, seq);
 }
 
+/**
+ * Parse a value.
+ *   @rd: The reader.
+ *   @ctx: The context.
+ *   &returns: The value.
+ */
 struct val_t *par_val(struct rd_t *rd, struct ctx_t *ctx)
 {
 	struct tok_t *tok;
@@ -136,19 +142,50 @@ struct seq_t *par_seq(struct rd_t *rd, struct ctx_t *ctx)
 	return seq;
 }
 
+void stradd(char **dst, const char *src)
+{
+	size_t len = strlen(*dst);
+
+	*dst = realloc(*dst, len + strlen(src));
+	strcpy(*dst + len, src);
+}
+
+
+/*
+void foo(const char *str)
+{
+	char *find, *ret;
+
+	ret = strdup("");
+	while((find = strchr(str, '$')) != NULL) {
+		if(isalnum(find[1]))
+		}
+		else if(find[1] == '$') {
+			str = find + 2;
+			strcpy(&ret, "$");
+		}
+		else {
+		}
+	}
+
+	free(ret);
+}
+*/
+
 /**
  * Parse a print statement.
  *   @rd: The reader.
+ *   @ctx: The context.
  *   @ns: The namespace.
  */
-void par_print(struct rd_t *rd, struct ns_t *ns)
+void par_print(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 {
 	struct tok_t *tok;
 	struct val_t *iter, *val = NULL, **ival = &val;
 
 	tok = rd_adv(rd, 1);
 	while((tok->id == TOK_ID) || (tok->id == TOK_STR)) {
-		*ival = val_new(strdup(tok->str));
+		*ival = val_new(strdup(ctx_str(ctx, ns, tok)));
 		ival = &(*ival)->next;
 		tok = rd_adv(rd, 1);
 	}
@@ -168,7 +205,13 @@ void par_print(struct rd_t *rd, struct ns_t *ns)
 	rd_adv(rd, 1);
 }
 
-void par_assign(struct rd_t *rd, struct ns_t *ns)
+/**
+ * Parse an statement.
+ *   @rd: The reader.
+ *   @ctx: The context.
+ *   @ns: The namespace.
+ */
+void par_assign(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 {
 	char *id;
 	struct tok_t *tok;
@@ -190,7 +233,7 @@ void par_assign(struct rd_t *rd, struct ns_t *ns)
 		struct val_t *val = NULL, **ival = &val;
 
 		do {
-			*ival = val_new(strdup(tok->str));
+			*ival = val_new(strdup(ctx_str(ctx, ns, tok)));
 			ival = &(*ival)->next;
 			tok = rd_adv(rd, 1);
 		} while((tok->id == TOK_ID) || (tok->id == TOK_STR));

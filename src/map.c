@@ -148,6 +148,13 @@ void list_add(struct list_t *list, void *ref)
 }
 
 
+struct map1_t *map1_new(void (*cmp)(const void *, const void *), void (*del)(void *))
+{
+	return NULL;
+}
+
+
+
 #if 0
 /**
  * Create a map.

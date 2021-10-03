@@ -6,28 +6,6 @@
 char *cli_app = NULL;
 
 
-/**
- * Lookup a variable only on the current level.
- *   @ns: The namespace.
- *   @id: The identifier.
- *   &returns: The variable if found, point to end of list otherwise.
- */
-struct bind_t **ns_lookup(struct ns_t *ns, const char *id)
-{
-	struct bind_t **bind;
-
-	bind = &ns->bind;
-	while(*bind != NULL) {
-		if(strcmp((*bind)->id, id) == 0)
-			break;
-
-		bind = &(*bind)->next;
-	}
-
-	return bind;
-}
-
-
 void arr_init(const char ***arr, uint32_t *cnt) {
 	*arr = malloc(0);
 	*cnt = 0;

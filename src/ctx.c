@@ -12,6 +12,9 @@ struct ctx_t *ctx_new(void)
 	ctx = malloc(sizeof(struct ctx_t));
 	ctx->map = map_new();
 	ctx->rules = rule_list_new();
+	ctx->str = malloc(64);
+	ctx->len = 0;
+	ctx->max = 64;
 
 	return ctx;
 }
@@ -24,6 +27,7 @@ void ctx_delete(struct ctx_t *ctx)
 {
 	map_delete(ctx->map);
 	rule_list_delete(ctx->rules);
+	free(ctx->str);
 	free(ctx);
 }
 
@@ -36,19 +40,21 @@ void ctx_delete(struct ctx_t *ctx)
 void ctx_run(struct ctx_t *ctx, const char **builds)
 {
 	struct rule_t *rule;
-	struct rule_iter_t iter;
+	struct rule_iter_t irule;
 	struct queue_t *queue;
 
 	queue = queue_new();
 
-	iter = rule_iter(ctx->rules);
-	while((rule = rule_next(&iter)) != NULL) {
+	irule = rule_iter(ctx->rules);
+	while((rule = rule_next(&irule)) != NULL) {
 		uint32_t i;
 		struct target_t *target;
 		struct target_iter_t iter;
 
 		iter = target_iter(rule->gens);
 		while((target = target_next(&iter)) != NULL) {
+			target->flags |= FLAG_BUILD;
+
 			for(i = 0; builds[i] != NULL; i++) {
 				if(strcmp(target->path, builds[i]) == 0)
 					queue_recur(queue, rule);
@@ -156,4 +162,103 @@ struct rule_t *ctx_rule(struct ctx_t *ctx, const char *id, struct target_list_t 
 	}
 
 	return NULL;
+}
+
+
+/**
+ * Add a character to the context string.
+ *   @ctx: The context.
+ *   @ch: The character.
+ */
+void ctx_ch(struct ctx_t *ctx, char ch)
+{
+	if(ctx->len == ctx->max)
+		ctx->str = realloc(ctx->str, ctx->max *= 2);
+
+	ctx->str[ctx->len++] = ch;
+}
+
+void ctx_buf(struct ctx_t *ctx, const char *buf, uint32_t len)
+{
+	while(len-- > 0)
+		ctx_ch(ctx, *buf++);
+}
+
+
+/**
+ * Process a string token, replacing variables as needed.
+ *   @ctx: The context.
+ *   @ns: The namespace.
+ *   @tok: The token.
+ *   &returns: The processed string.
+ */
+const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok)
+{
+	const char *ptr, *find, *str = tok->str;
+
+	ctx->len = 0;
+
+	find = strchr(str, '$');
+	if(find == NULL)
+		return str;
+
+	do {
+		ctx_buf(ctx, str, find - str);
+		if(find[1] == '$') {
+			str = find + 2;
+			ctx_ch(ctx, '$');
+		}
+		else if(find[1] == '{') {
+			fatal("stub");
+		}
+		else if(ch_alpha(find[1])) {
+			uint32_t i = 0;
+			char id[256];
+			struct bind_t *bind;
+
+			ptr = find + 1;
+
+			do {
+				if(i == 254)
+					loc_err(tok->loc, "Variable name too long.");
+
+				id[i++] = *ptr++;
+			} while(ch_alnum(*ptr));
+
+			id[i] = '\0';
+			bind = ns_find(ns, id);
+			if(bind == NULL)
+				loc_err(tok->loc, "Unknown variable '%s'.", id);
+
+			switch(bind->tag) {
+			case val_v: {
+				struct val_t *val;
+
+				for(val = bind->data.val; val != NULL; val = val->next) {
+					if(val != bind->data.val)
+						ctx_ch(ctx, ' ');
+
+					ctx_buf(ctx, val->str, strlen(val->str));
+				}
+			} break;
+
+			case rule_v:
+				fatal("FIXME stub");
+
+			case ns_v:
+				loc_err(tok->loc, "Cannot use namespace '%s' as a string.", id);
+			}
+
+			str = ptr;
+		}
+		else
+			loc_err(tok->loc, "Invalid variable in string.");
+
+		find = strchr(str, '$');
+	} while(find != NULL);
+
+	ctx_buf(ctx, str, strlen(str));
+	ctx_ch(ctx, '\0');
+
+	return ctx->str;
 }
