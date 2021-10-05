@@ -100,6 +100,11 @@ int64_t os_mtime(const char *path)
 	return 1000000 * info.st_mtim.tv_sec + info.st_mtim.tv_nsec / 1000;
 }
 
+void os_mkdir(const char *path)
+{
+	mkdir(path, 0777);
+}
+
 
 /**
  * Allocate memory.

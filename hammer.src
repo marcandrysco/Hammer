@@ -1,0 +1,47 @@
+#!/bin/sh
+
+## 
+# Hammer build system
+#   version 1.0dev0
+##
+
+TMP=".hammer.c"
+BIN="hammer.cache"
+CC="gcc"
+
+test $VERBOSE && echo "cc=$CC"
+
+sed '0,/\#\#csrc\#\#/d;/\#\#make\#\#/,$d' "$0" > "$TMP" || exit $?
+"$CC" -g -O2 "$TMP" -o "$BIN" || exit $?
+
+sed '0,/\#\#make\#\#/d' "$0" > Makefile || exit $?
+
+exit 0
+
+help() {
+  echo "$0: <command>"
+  echo "  conf  Congi"
+  echo "  init  Initialize the project by c"
+}
+
+if [ $# -eq 0 ] ; then
+  echo "missing command" >&2
+  help >&2
+  exit 0
+fi
+
+cmd="$1" ; shift
+
+case "$cmd" in
+  "init" )
+    echo "$#"
+    ;;
+
+  "update" )
+    ;;
+
+  * )
+    echo "$0: invalid command '$cmd'" >&2 ; exit 1
+esac
+
+exit 0

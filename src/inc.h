@@ -37,6 +37,9 @@ struct val_t;
  */
 uint64_t hash64(uint64_t hash, const char *str);
 
+char *str_fmt(const char *pat, ...);
+void str_set(char **dst, char *src);
+
 /*
  * backend declarations
  */
@@ -46,6 +49,7 @@ void fatal(const char *fmt, ...) __attribute__((noreturn));
 
 void os_exec(struct val_t *val);
 int64_t os_mtime(const char *path);
+void os_mkdir(const char *path);
 
 void *mem_alloc(size_t sz);
 void *mem_realloc(void *ptr, size_t sz);
@@ -72,31 +76,47 @@ void list_add(struct list_t *list, void *ref);
  * parser declarations
  */
 void par_top(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
+void par_stmt(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
 void par_rule(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-struct seq_t *par_seq(struct rd_t *rd, struct ctx_t *ctx);
+struct seq_t *par_seq(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
+struct val_t *par_val(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
 void par_print(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
+void par_dir(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
 void par_assign(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
 
 
 /**
+ * Options structure.
+ *   @force: Force rebuild.
+ *   @dir: The selected directory.
+ */
+struct opt_t {
+	bool force;
+	const char *dir;
+};
+
+/**
  * Context structure.
+ *   @opt: The options.
  *   @map: The target map.
  *   @rules: The set of rules.
- *   @str: The working string.
+ *   @str, dir: The working string and selected directory.
  *   @len, max: The length and maximum.
  */
 struct ctx_t {
+	const struct opt_t *opt;
+
 	struct map_t *map;
 	struct rule_list_t *rules;
 
-	char *str;
+	char *str, *dir;
 	uint32_t len, max;
 };
 
 /*
  * context declarations
  */
-struct ctx_t *ctx_new(void);
+struct ctx_t *ctx_new(const struct opt_t *opt);
 void ctx_delete(struct ctx_t *ctx);
 
 void ctx_run(struct ctx_t *ctx, const char **builds);
@@ -416,9 +436,10 @@ struct tok_t {
 /*
  * token definitions
  */
-#define TOK_ID  (0x1000)
-#define TOK_STR (0x1001)
-#define TOK_EOF (0xFFFF)
+#define TOK_ID   (0x1000)
+#define TOK_STR  (0x1001)
+#define TOK_STR2 (0x1002)
+#define TOK_EOF  (0xFFFF)
 
 /*
  * token declaratinos

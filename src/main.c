@@ -38,3 +38,37 @@ uint64_t hash64(uint64_t hash, const char *str)
 
 	return hash;
 }
+
+
+/**
+ * Create a formatted string.
+ *   @pat: The printf-style pattern.
+ */
+char *str_fmt(const char *pat, ...)
+{
+	char *ret;
+	va_list args;
+
+	va_start(args, pat);
+	ret = malloc(vsnprintf(NULL, 0, pat, args) + 1);
+	va_end(args);
+
+	va_start(args, pat);
+	vsprintf(ret, pat, args);
+	va_end(args);
+
+	return ret;
+}
+
+/**
+ * Set a string.
+ *   @dst: Ref. The destination, freed is non-null.
+ *   @src: The string to use.
+ */
+void str_set(char **dst, char *src)
+{
+	if(*dst != NULL)
+		free(*dst);
+
+	*dst = src;
+}

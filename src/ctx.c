@@ -3,16 +3,19 @@
 
 /**
  * Create a new context.
+ *   @opt: The options structure.
  *   &returns: The context.
  */
-struct ctx_t *ctx_new(void)
+struct ctx_t *ctx_new(const struct opt_t *opt)
 {
 	struct ctx_t *ctx;
 
 	ctx = malloc(sizeof(struct ctx_t));
+	ctx->opt = opt;
 	ctx->map = map_new();
 	ctx->rules = rule_list_new();
 	ctx->str = malloc(64);
+	ctx->dir = NULL;
 	ctx->len = 0;
 	ctx->max = 64;
 
@@ -25,6 +28,9 @@ struct ctx_t *ctx_new(void)
  */
 void ctx_delete(struct ctx_t *ctx)
 {
+	if(ctx->dir != NULL)
+		free(ctx->dir);
+
 	map_delete(ctx->map);
 	rule_list_delete(ctx->rules);
 	free(ctx->str);
@@ -53,12 +59,13 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 
 		iter = target_iter(rule->gens);
 		while((target = target_next(&iter)) != NULL) {
-			target->flags |= FLAG_BUILD;
-
 			for(i = 0; builds[i] != NULL; i++) {
 				if(strcmp(target->path, builds[i]) == 0)
 					queue_recur(queue, rule);
 			}
+
+			if((target->flags & FLAG_BUILD) == 0)
+				target->flags |= FLAG_BUILD;
 		}
 	}
 
@@ -87,7 +94,26 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 				max = target_mtime(target);
 		}
 
-		if(max > min) {
+		if((max > min) || ctx->opt->force) {
+			iter = target_iter(rule->gens);
+			while((target = target_next(&iter)) != NULL) {
+				char *path, *iter;
+
+				if(target->flags & FLAG_SPEC)
+					continue;
+
+				path = str_fmt("%s/%s", ctx->dir, target->path);
+				iter = path;
+				while((iter = strchr(iter, '/')) != NULL) {
+					*iter = '\0';
+					os_mkdir(path);
+					*iter = '/';
+					iter++;
+				}
+
+				free(path);
+			}
+
 			for(cmd = rule->seq->head; cmd != NULL; cmd = cmd->next)
 				os_exec(cmd->val);
 		}
@@ -199,10 +225,7 @@ const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok)
 	ctx->len = 0;
 
 	find = strchr(str, '$');
-	if(find == NULL)
-		return str;
-
-	do {
+	while(find != NULL) {
 		ctx_buf(ctx, str, find - str);
 		if(find[1] == '$') {
 			str = find + 2;
@@ -226,27 +249,34 @@ const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok)
 			} while(ch_alnum(*ptr));
 
 			id[i] = '\0';
-			bind = ns_find(ns, id);
-			if(bind == NULL)
-				loc_err(tok->loc, "Unknown variable '%s'.", id);
 
-			switch(bind->tag) {
-			case val_v: {
-				struct val_t *val;
+			if(strcmp(id, "dir") == 0) {
+				if(ctx->dir != NULL)
+					ctx_buf(ctx, ctx->dir, strlen(ctx->dir));
+			}
+			else {
+				bind = ns_find(ns, id);
+				if(bind == NULL)
+					loc_err(tok->loc, "Unknown variable '%s'.", id);
 
-				for(val = bind->data.val; val != NULL; val = val->next) {
-					if(val != bind->data.val)
-						ctx_ch(ctx, ' ');
+				switch(bind->tag) {
+				case val_v: {
+					struct val_t *val;
 
-					ctx_buf(ctx, val->str, strlen(val->str));
+					for(val = bind->data.val; val != NULL; val = val->next) {
+						if(val != bind->data.val)
+							ctx_ch(ctx, ' ');
+
+						ctx_buf(ctx, val->str, strlen(val->str));
+					}
+				} break;
+
+				case rule_v:
+					fatal("FIXME stub");
+
+				case ns_v:
+					loc_err(tok->loc, "Cannot use namespace '%s' as a string.", id);
 				}
-			} break;
-
-			case rule_v:
-				fatal("FIXME stub");
-
-			case ns_v:
-				loc_err(tok->loc, "Cannot use namespace '%s' as a string.", id);
 			}
 
 			str = ptr;
@@ -255,7 +285,7 @@ const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok)
 			loc_err(tok->loc, "Invalid variable in string.");
 
 		find = strchr(str, '$');
-	} while(find != NULL);
+	}
 
 	ctx_buf(ctx, str, strlen(str));
 	ctx_ch(ctx, '\0');

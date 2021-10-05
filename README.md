@@ -9,7 +9,7 @@ When all you have is a hammer.
 When I start a software project, I find selecting a build system (BS) to be
 extremely unpleasant but very important. What BS do I use? I have walked the
 halls of CMake, fought the dragons of Autotools, and made the pilgramages to
-GNU Make. Each one is more ham-fisted than the last. At my journeys end, I
+GNU Make. Each one is more ham-fisted than the last. At my journey's end, I
 feel unsatisfied. My heart aches. An emptiness remains, and I, like any other
 proud computer scientist, resolve to correct this wrong in the only way I know
 how: starting yet another open source project to solves the same exact
