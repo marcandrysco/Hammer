@@ -14,10 +14,19 @@
 #include <string.h>
 
 /*
+ * shorter type names
+ */
+typedef int32_t i32;
+typedef uint32_t u32;
+typedef int64_t i64;
+typedef uint64_t u64;
+
+/*
  * structure prototypes
  */
 struct cmd_t;
 struct ctx_t;
+struct env_t;
 struct list_t;
 struct queue_t;
 struct ns_t;
@@ -32,17 +41,24 @@ struct loc_t;
 struct tok_t;
 struct val_t;
 
+typedef int(*cmp_f)(const void *, const void *);
+typedef void(*del_f)(void *);
+
 /*
  * common declarations
  */
 uint64_t hash64(uint64_t hash, const char *str);
 
-char *str_fmt(const char *pat, ...);
-void str_set(char **dst, char *src);
+/*
+ * base declarations
+ */
+struct block_t *ham_load(const char *path);
 
 /*
  * backend declarations
  */
+extern i64 os_memcnt;
+
 void print(const char *fmt, ...);
 void printv(const char *fmt, va_list args);
 void fatal(const char *fmt, ...) __attribute__((noreturn));
@@ -50,10 +66,6 @@ void fatal(const char *fmt, ...) __attribute__((noreturn));
 void os_exec(struct val_t *val);
 int64_t os_mtime(const char *path);
 void os_mkdir(const char *path);
-
-void *mem_alloc(size_t sz);
-void *mem_realloc(void *ptr, size_t sz);
-void mem_free(void *ptr);
 
 /*
  * set declarations
@@ -63,26 +75,34 @@ void set_delete(struct set_t *set, void(*del)(void *));
 
 void set_add(struct set_t *set, void *ref);
 
+
+/**
+ * List structure.
+ *   @head, tail: The head and tail links.
+ *   @del: Value deletion function.
+ */
+struct list_t {
+	struct link_t *head, **tail;
+	void (*del)(void *);
+};
+
+/**
+ * Link structure.
+ *   @val: The value.
+ *   @next: The next link.
+ */
+struct link_t {
+	void *val;
+	struct link_t *next;
+};
+
 /*
  * list declarations
  */
-struct list_t *list_new(void);
-void list_delete(struct list_t *list, void(*del)(void *));
+struct list_t *list_new(void(*del)(void *));
+void list_delete(struct list_t *list);
 
-void list_add(struct list_t *list, void *ref);
-
-
-/*
- * parser declarations
- */
-void par_top(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-void par_stmt(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-void par_rule(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-struct seq_t *par_seq(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-struct val_t *par_val(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-void par_print(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-void par_dir(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
-void par_assign(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns);
+void list_add(struct list_t *list, void *val);
 
 
 /**
@@ -100,8 +120,10 @@ struct opt_t {
  *   @opt: The options.
  *   @map: The target map.
  *   @rules: The set of rules.
+ *   @gen, dep: The generator and depedency values.
  *   @str, dir: The working string and selected directory.
  *   @len, max: The length and maximum.
+ *   @gen, deps: The generated and dependency targets.
  */
 struct ctx_t {
 	const struct opt_t *opt;
@@ -109,8 +131,11 @@ struct ctx_t {
 	struct map_t *map;
 	struct rule_list_t *rules;
 
+	struct val_t *gen, *dep;
 	char *str, *dir;
 	uint32_t len, max;
+
+	struct target_list_t *gens, *deps;
 };
 
 /*
@@ -452,10 +477,12 @@ void tok_err(struct tok_t *tok, const char *fmt, ...);
 
 /**
  * Value structure.
+ *   @spec: Special flag.
  *   @str: The string.
  *   @next: The next value.
  */
 struct val_t {
+	bool spec;
 	char *str;
 
 	struct val_t *next;
@@ -464,10 +491,16 @@ struct val_t {
 /*
  * value declarations
  */
-struct val_t *val_new(char *str);
+struct val_t *val_new(bool spec, char *str);
+struct val_t *val_dup(const struct val_t *val);
 void val_delete(struct val_t *val);
 void val_clear(struct val_t *val);
+
+char *val_id(struct val_t *val, struct loc_t loc);
+char *val_str(struct val_t *val, struct loc_t loc);
 uint32_t val_len(struct val_t *val);
+
+void val_final(struct val_t *val, const char *dir);
 
 
 /**
@@ -475,15 +508,18 @@ uint32_t val_len(struct val_t *val);
  *   @id: The identifier.
  *   @tag: The tag.
  *   @data: The data.
+ *   @loc: The location.
  *   @next: The next binding.
  */
 enum bind_e { val_v, rule_v, ns_v };
-union bind_u { struct val_t *val; struct rule_t *rule; };
+union bind_u { struct val_t *val; struct syn_t *syn; };
 struct bind_t {
 	char *id;
 
 	enum bind_e tag;
 	union bind_u data;
+
+	struct loc_t loc;
 
 	struct bind_t *next;
 };
@@ -491,11 +527,45 @@ struct bind_t {
 /*
  * binding declarations
  */
-struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data);
+struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data, struct loc_t loc);
 void bind_delete(struct bind_t *bind);
 
 struct bind_t *bind_val(char *id, struct val_t *val);
-struct bind_t *bind_rule(char *id, struct rule_t *rule);
+//struct bind_t *bind_rule(char *id, struct rule_t *rule);
+
+/*
+ * string converstion declarations
+ */
+char *get_str(const char **str, struct loc_t loc);
+void get_var(const char **str, char *var, struct loc_t loc);
+
+/*
+ * string declarations
+ */
+char *str_fmt(const char *pat, ...);
+void str_set(char **dst, char *src);
+void str_final(char **str, const char *dir);
+
+
+/**
+ * String structure.
+ *   @buf: The character buffer.
+ *   @len, max; The current and maximum lengths.
+ */
+struct buf_t {
+	char *str;
+	uint32_t len, max;
+};
+
+/*
+ * string declarations
+ */
+struct buf_t buf_new(uint32_t init);
+char *buf_done(struct buf_t *buf);
+
+void buf_ch(struct buf_t *buf, char ch);
+void buf_mem(struct buf_t *buf, const char *mem, u32 len);
+void buf_str(struct buf_t *buf, const char *str);
 
 /*
  * character declarations
@@ -504,7 +574,14 @@ bool ch_space(int ch);
 bool ch_alpha(int ch);
 bool ch_num(int ch);
 bool ch_alnum(int ch);
+bool ch_var(int ch);
+bool ch_str(int ch);
 bool ch_id(int ch);
+
+/*
+ * string type declarations
+ */
+bool is_var(const char *str);
 
 
 /**
@@ -535,6 +612,191 @@ struct bind_t **ns_lookup(struct ns_t *ns, const char *id);
 
 
 /**
+ * Block structure.
+ *   @stmt: The list of statements.
+ */
+struct block_t {
+	struct stmt_t *stmt;
+};
+
+/*
+ * block declarations
+ */
+struct block_t *block_new(void);
+void block_delete(struct block_t *block);
+
+/**
+ * Syntatic rule structure.
+ *   @gen, dep: The generator and dependency values.
+ *   @cmd: The list of commands.
+ *   @loc: The location.
+ */
+struct syn_t {
+	struct imm_t *gen, *dep;
+	struct list_t *cmd;
+
+	struct loc_t loc;
+};
+
+/*
+ * syntax rule declarations
+ */
+struct syn_t *syn_new(struct imm_t *gen, struct imm_t *dep, struct loc_t loc);
+void syn_delete(struct syn_t *syn);
+
+void syn_add(struct syn_t *syn, struct imm_t *cmd);
+
+
+/**
+ * Directory structure.
+ *   @def: Default flag.
+ *   @raw: The raw string.
+ *   @block: The optional blcok.
+ */
+struct dir_t {
+	bool def;
+	struct raw_t *raw;
+	struct block_t *block;
+};
+
+/*
+ * directory declarations
+ */
+struct dir_t *dir_new(bool def, struct raw_t *raw, struct block_t *block);
+void dir_delete(struct dir_t *dir);
+
+
+/**
+ * Statement structure.
+ *   @tag: The tag.
+ *   @data: The data.
+ *   @loc: The location.
+ *   @next: The next statement.
+ */
+enum stmt_e { assign_v, syn_v, dir_v, print_v };
+union stmt_u { struct assign_t *assign; struct syn_t *syn; struct dir_t *dir; struct print_t *print; };
+struct stmt_t {
+	enum stmt_e tag;
+	union stmt_u data;
+	struct loc_t loc;
+
+	struct stmt_t *next;
+};
+
+/*
+ * statement declarations
+ */
+struct stmt_t *stmt_new(enum stmt_e tag, union stmt_u data, struct loc_t loc);
+void stmt_delete(struct stmt_t *stmt);
+void stmt_clear(struct stmt_t *stmt);
+
+
+/**
+ * Printing statement.
+ *   @imm: The immediate value.
+ */
+struct print_t {
+	struct imm_t *imm;
+};
+
+/*
+ * print declarations
+ */
+struct print_t *print_new(struct imm_t *imm);
+void print_delete(struct print_t *print);
+
+
+/**
+ * Assignment structure.
+ *   @id: The identifier.
+ *   @val: The value.
+ */
+struct assign_t {
+	struct raw_t *id;
+	struct imm_t *val;
+};
+
+/*
+ * assignment declarations
+ */
+struct assign_t *assign_new(struct raw_t *id, struct imm_t *val);
+void assign_delete(struct assign_t *assign);
+
+
+/**
+ * String list.
+ *   @raw: The raw strings list.
+ */
+struct imm_t {
+	struct raw_t *raw;
+};
+
+/*
+ * immediate value declaration
+ */
+struct imm_t *imm_new(void);
+void imm_delete(struct imm_t *imm);
+
+u32 imm_len(struct imm_t *imm);
+
+
+/**
+ * Raw string structure.
+ *   @spec, quote: Special and quote flags.
+ *   @str: The string.
+ *   @loc: The location.
+ *   @next: The next raw string.
+ */
+struct raw_t {
+	bool spec, quote;
+
+	char *str;
+	struct loc_t loc;
+
+	struct raw_t *next;
+};
+
+/*
+ * raw value declarations
+ */
+struct raw_t *raw_new(bool spec, bool quote, char *str, struct loc_t loc);
+struct raw_t *raw_dup(const struct raw_t *raw);
+void raw_delete(struct raw_t *raw);
+void raw_clear(struct raw_t *raw);
+
+
+/**
+ * Environment structure.
+ *   @map: The variable mapping.
+ *   @up: The parent environment.
+ */
+struct env_t {
+	struct map0_t *map;
+
+	struct env_t *up;
+};
+
+/*
+ * evaluation declarations
+ */
+void eval_top(struct block_t *block, struct ctx_t *ctx);
+void eval_block(struct block_t *block, struct ctx_t *ctx, struct env_t *env);
+void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env);
+struct val_t *eval_imm(struct imm_t *imm, struct ctx_t *ctx, struct env_t *env);
+struct val_t *eval_raw(struct raw_t *raw, struct ctx_t *ctx, struct env_t *env);
+struct val_t *eval_var(const char **str, struct loc_t loc, struct ctx_t *ctx, struct env_t *env);
+
+/*
+ * environment declarations
+ */
+struct env_t env_new(struct env_t *up);
+void env_delete(struct env_t env);
+
+struct bind_t *env_get(struct env_t *env, const char *id);
+void env_put(struct env_t *env, struct bind_t *bind);
+
+
+/**
  * Map structure.
  *   @ent: The entity list.
  *   @cmp: Comparison function.
@@ -558,3 +820,39 @@ struct ent1_t {
 
 	struct ent1_t *next;
 };
+
+
+/**
+ * Entry structure.
+ *   @key: The key.
+ *   @val: The value.
+ *   @next: The next entry.
+ */
+struct entry0_t {
+	const void *key;
+	void *val;
+
+	struct entry0_t *next;
+};
+
+/**
+ * Map structure.
+ *   @cmp: The comparison function.
+ *   @del: The deletion function.
+ */
+struct map0_t {
+	cmp_f cmp;
+	del_f del;
+
+	struct entry0_t *entry;
+};
+
+/*
+ * map declarations
+ */
+struct map0_t *map0_new(cmp_f cmp, del_f del);
+void map0_delete(struct map0_t *map);
+
+void map0_add(struct map0_t *map, const void *key, void *val);
+void *map0_get(struct map0_t *map, const void *key);
+void *map_rem(struct map0_t *map, const void *key);

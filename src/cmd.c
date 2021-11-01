@@ -9,7 +9,7 @@ struct seq_t *seq_new(void)
 {
 	struct seq_t *seq;
 
-	seq = mem_alloc(sizeof(struct seq_t));
+	seq = malloc(sizeof(struct seq_t));
 	*seq = (struct seq_t){ NULL, &seq->head };
 
 	return seq;
@@ -27,10 +27,10 @@ void seq_delete(struct seq_t *seq)
 	while(cmd != NULL) {
 		cmd = (tmp = cmd)->next;
 		val_clear(tmp->val);
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(seq);
+	free(seq);
 }
 
 
@@ -43,7 +43,7 @@ void seq_add(struct seq_t *seq, struct val_t *val)
 {
 	struct cmd_t *cmd;
 
-	cmd = mem_alloc(sizeof(struct cmd_t));
+	cmd = malloc(sizeof(struct cmd_t));
 	*cmd = (struct cmd_t){ val, NULL };
 
 	*seq->tail = cmd;

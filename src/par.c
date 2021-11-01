@@ -1,25 +1,6 @@
 #include "inc.h"
 
 /**
- * Parse a block of statements.
- *   @rd: The reader.
- *   @ctx: The context.
- *   @ns: The namespace.
- */
-void par_block(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
-{
-	struct tok_t *tok;
-
-	for(;;) {
-		tok = rd_top(rd);
-		if(tok->id == '}')
-			break;
-
-		par_stmt(rd, ctx, ns);
-	}
-}
-
-/**
  * Parse from the top.
  *   @rd: The reader.
  *   @ctx: The context.
@@ -36,6 +17,30 @@ void par_top(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 
 		par_stmt(rd, ctx, ns);
 	}
+}
+
+/**
+ * Parse a block of statements.
+ *   @rd: The reader.
+ *   @ctx: The context.
+ *   @ns: The namespace.
+ */
+void par_block(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
+{
+	struct tok_t *tok;
+
+	assert(rd_get(rd, 0)->id == '{');
+
+	rd_adv(rd, 1);
+	for(;;) {
+		tok = rd_top(rd);
+		if(tok->id == '}')
+			break;
+
+		par_stmt(rd, ctx, ns);
+	}
+
+	rd_adv(rd, 1);
 }
 
 /**
@@ -108,7 +113,10 @@ void par_rule(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 
 	if(tok->id == '{') {
 		rd_adv(rd, 1);
+		ctx->gens = gens;
+		ctx->deps = deps;
 		seq = par_seq(rd, ctx, ns);
+		ctx->gens = ctx->deps = NULL;
 	}
 	else if(tok->id == ';') {
 		seq = seq_new();
@@ -165,7 +173,7 @@ struct val_t *par_val(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 		return NULL;
 
 	do {
-		*ival = val_new(strdup(ctx_str(ctx, ns, tok)));
+		*ival = val_new(false, strdup(ctx_str(ctx, ns, tok)));
 		ival = &(*ival)->next;
 		tok = rd_adv(rd, 1);
 	} while((tok->id == TOK_ID) || (tok->id == TOK_STR));
@@ -178,35 +186,6 @@ struct val_t *par_val(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 	return val;
 }
 
-void stradd(char **dst, const char *src)
-{
-	size_t len = strlen(*dst);
-
-	*dst = realloc(*dst, len + strlen(src));
-	strcpy(*dst + len, src);
-}
-
-
-/*
-void foo(const char *str)
-{
-	char *find, *ret;
-
-	ret = strdup("");
-	while((find = strchr(str, '$')) != NULL) {
-		if(isalnum(find[1]))
-		}
-		else if(find[1] == '$') {
-			str = find + 2;
-			strcpy(&ret, "$");
-		}
-		else {
-		}
-	}
-
-	free(ret);
-}
-*/
 
 /**
  * Parse a print statement.
@@ -221,7 +200,7 @@ void par_print(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 
 	tok = rd_adv(rd, 1);
 	while((tok->id == TOK_ID) || (tok->id == TOK_STR)) {
-		*ival = val_new(strdup(ctx_str(ctx, ns, tok)));
+		*ival = val_new(false, strdup(ctx_str(ctx, ns, tok)));
 		ival = &(*ival)->next;
 		tok = rd_adv(rd, 1);
 	}
@@ -270,11 +249,8 @@ void par_dir(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 		ctx->dir = strdup(str);
 
 	tok = rd_top(rd);
-	if(tok->id == '{') {
-		if(!match) {
-		}
-		fatal("FIXME stub");
-	}
+	if(tok->id == '{')
+		par_block(rd, ctx, match ? ns : NULL);
 	else if(tok->id != ';')
 		loc_err(tok->loc, "Expected ';' or '{'.");
 }
@@ -298,16 +274,18 @@ void par_assign(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 	id = strdup(tok->str);
 	rd_adv(rd, 2);
 
-	bind = ns_lookup(ns, id);
-	if(*bind != NULL)
-		loc_err(tok->loc, "Duplicate declaration of '%s'.", id);
+	if(ns != NULL) {
+		bind = ns_lookup(ns, id);
+		if(*bind != NULL)
+			loc_err(tok->loc, "Duplicate declaration of '%s'.", id);
+	}
 
 	tok = rd_top(rd);
 	if((tok->id == TOK_ID) || (tok->id == TOK_STR)) {
 		struct val_t *val = NULL, **ival = &val;
 
 		do {
-			*ival = val_new(strdup(ctx_str(ctx, ns, tok)));
+			*ival = val_new(false, strdup(ctx_str(ctx, ns, tok)));
 			ival = &(*ival)->next;
 			tok = rd_adv(rd, 1);
 		} while((tok->id == TOK_ID) || (tok->id == TOK_STR));
@@ -316,7 +294,9 @@ void par_assign(struct rd_t *rd, struct ctx_t *ctx, struct ns_t *ns)
 			loc_err(tok->loc, "Expected string or ';'.");
 
 		rd_adv(rd, 1);
-		*bind = bind_val(id, val);
+
+		if(ns != NULL)
+			*bind = bind_val(id, val);
 	}
 	else if(tok->id == '[') {
 		cli_err("FIXME Stub");

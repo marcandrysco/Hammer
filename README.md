@@ -69,7 +69,8 @@ one file to see `make` update the output file `both`.
 
 Targets that begin with a dot (`.`) are called special targets. They do not
 reference a file path; instead, they are always built. If you have a file that
-starts with a dot, just put the file in quotes (e.g. `".not_special"`).
+starts with a dot that you wish to build, place the file in quotes (e.g.
+`".not_special"`).
 
 
 ## File Structure
@@ -104,9 +105,16 @@ prog : a.o b.o {
 }
 
 for src in $src {
-  obj = $src.ext(.o)
+  obj = ${src.ext(.o)}
 
   $obj : $src {
   }
 }
 ```
+
+
+### Detail
+
+Unquoted strings can be make up of alphabetical characters (`[a-zA-Z]`),
+numeric characters (`[0-9]`), some special charcters (`[.,~/_-]`), and
+non-ascii unit code values. When in doubt, use quotes. 

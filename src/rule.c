@@ -68,7 +68,7 @@ struct rule_list_t *rule_list_new(void)
 {
 	struct rule_list_t *list;
 
-	list = mem_alloc(sizeof(struct rule_list_t));
+	list = malloc(sizeof(struct rule_list_t));
 	*list = (struct rule_list_t){ NULL };
 
 	return list;
@@ -86,10 +86,10 @@ void rule_list_delete(struct rule_list_t *list)
 	while(inst != NULL) {
 		inst = (tmp = inst)->next;
 		rule_delete(tmp->rule);
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(list);
+	free(list);
 }
 
 
@@ -102,7 +102,7 @@ void rule_list_add(struct rule_list_t *list, struct rule_t *rule)
 {
 	struct rule_inst_t *inst;
 
-	inst = mem_alloc(sizeof(struct rule_inst_t));
+	inst = malloc(sizeof(struct rule_inst_t));
 	inst->rule = rule;
 
 	inst->next = list->inst;
@@ -137,7 +137,7 @@ struct queue_t *queue_new(void)
 {
 	struct queue_t *queue;
 
-	queue = mem_alloc(sizeof(struct queue_t));
+	queue = malloc(sizeof(struct queue_t));
 	*queue = (struct queue_t){ NULL, &queue->head };
 
 	return queue;
@@ -149,7 +149,7 @@ struct queue_t *queue_new(void)
  */
 void queue_delete(struct queue_t *queue)
 {
-	mem_free(queue);
+	free(queue);
 }
 
 
@@ -191,7 +191,7 @@ void queue_add(struct queue_t *queue, struct rule_t *rule)
 {
 	struct item_t *item;
 
-	item = mem_alloc(sizeof(struct item_t));
+	item = malloc(sizeof(struct item_t));
 	item->rule = rule;
 	item->next = NULL;
 
@@ -218,7 +218,7 @@ struct rule_t *queue_rem(struct queue_t *queue)
 		queue->tail = &queue->head;
 
 	rule = item->rule;
-	mem_free(item);
+	free(item);
 
 	return rule;
 }

@@ -27,10 +27,9 @@ void arr_add(const char ***arr, uint32_t *cnt, const char *str)
  */
 void cli_proc(char **args)
 {
+	struct block_t *top;
 	struct opt_t opt;
-	struct rd_t *rd;
 	struct ctx_t *ctx;
-	struct ns_t *ns;
 	const char **arr;
 	uint32_t i, k, cnt;
 
@@ -52,7 +51,9 @@ void cli_proc(char **args)
 					case 'f': opt.force = true; break;
 
 					case 'd':
-						if(args[i][k + 1] == '\0') {
+						if(opt.dir != NULL)
+							cli_err("Directory already given.");
+						else if(args[i][k + 1] == '\0') {
 							if((opt.dir = args[++i]) == NULL)
 								cli_err("Missing directory (-d).");
 						}
@@ -73,20 +74,16 @@ void cli_proc(char **args)
 			arr_add(&arr, &cnt, args[i]);
 	}
 
-	print("dir=%s\n", opt.dir ?: "(null)");
-
 	arr_add(&arr, &cnt, NULL);
 
-	rd = rd_open("Hammer");
+	top = ham_load("Hammer");
 	ctx = ctx_new(&opt);
-	ns = ns_new(NULL, NULL);
 
-	par_top(rd, ctx, ns);
+	eval_top(top, ctx);
 	ctx_run(ctx, arr);
 
-	ns_delete(ns);
+	block_delete(top);
 	ctx_delete(ctx);
-	rd_close(rd);
 	arr_delete(arr, cnt);
 }
 

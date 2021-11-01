@@ -1,4 +1,6 @@
 *.o
 *.d
 *.swp
+hammer.c
+hammer.sh
 hammer.cache

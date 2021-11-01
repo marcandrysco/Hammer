@@ -15,9 +15,11 @@ struct ctx_t *ctx_new(const struct opt_t *opt)
 	ctx->map = map_new();
 	ctx->rules = rule_list_new();
 	ctx->str = malloc(64);
-	ctx->dir = NULL;
+	ctx->dir = opt->dir ? strdup(opt->dir) : NULL;
 	ctx->len = 0;
 	ctx->max = 64;
+	ctx->gens = ctx->deps = NULL;
+	ctx->gen = ctx->dep = NULL;
 
 	return ctx;
 }
@@ -64,9 +66,33 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 					queue_recur(queue, rule);
 			}
 
-			if((target->flags & FLAG_BUILD) == 0)
+			if((target->flags & (FLAG_BUILD | FLAG_SPEC)) == 0)
 				target->flags |= FLAG_BUILD;
 		}
+	}
+
+	if(ctx->dir == NULL)
+		ctx->dir = strdup("");
+	else if(ctx->dir[0] == '\0')
+		str_set(&ctx->dir, strdup("./"));
+	else if(ctx->dir[strlen(ctx->dir) - 1] != '/')
+		str_set(&ctx->dir, str_fmt("%s/", ctx->dir));
+
+	struct ent_t *ent; //FIXME uhg
+
+	for(ent = ctx->map->ent; ent != NULL; ent = ent->next) {
+		struct target_t *target = ent->target;
+
+		if(target->flags & FLAG_BUILD)
+			str_set(&target->path, str_fmt("%s%s", ctx->dir, target->path));
+	}
+
+	irule = rule_iter(ctx->rules);
+	while((rule = rule_next(&irule)) != NULL) {
+		struct cmd_t *cmd;
+
+		for(cmd = rule->seq->head; cmd != NULL; cmd = cmd->next)
+			val_final(cmd->val, ctx->dir);
 	}
 
 	while((rule = queue_rem(queue)) != NULL) {
@@ -102,7 +128,7 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 				if(target->flags & FLAG_SPEC)
 					continue;
 
-				path = str_fmt("%s/%s", ctx->dir, target->path);
+				path = strdup(target->path);
 				iter = path;
 				while((iter = strchr(iter, '/')) != NULL) {
 					*iter = '\0';
@@ -204,10 +230,33 @@ void ctx_ch(struct ctx_t *ctx, char ch)
 	ctx->str[ctx->len++] = ch;
 }
 
+void ctx_bufstr(struct ctx_t *ctx, const char *buf)
+{
+	while(*buf != '\0')
+		ctx_ch(ctx, *buf++);
+}
+
 void ctx_buf(struct ctx_t *ctx, const char *buf, uint32_t len)
 {
 	while(len-- > 0)
 		ctx_ch(ctx, *buf++);
+}
+
+struct val_t *ctx_var(struct ctx_t *ctx, struct ns_t *ns, const char *id, struct loc_t loc)
+{
+	struct bind_t *bind;
+
+	if(strcmp(id, "dir") == 0)
+		return val_new(false, ctx->dir);
+
+	bind = ns_find(ns, id);
+	if(bind == NULL)
+		loc_err(loc, "Unknown variable '%s'.", id);
+
+	if(bind->tag != val_v)
+		loc_err(loc, "Name '%s' does not refer to a variable.", id);
+
+	return val_dup(bind->data.val);
 }
 
 
@@ -224,15 +273,100 @@ const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok)
 
 	ctx->len = 0;
 
-	find = strchr(str, '$');
+	find = (ns ? strchr(str, '$') : NULL);
 	while(find != NULL) {
 		ctx_buf(ctx, str, find - str);
 		if(find[1] == '$') {
 			str = find + 2;
 			ctx_ch(ctx, '$');
 		}
+		else if(find[1] == '@') {
+			struct target_t *target;
+			struct target_iter_t iter;
+
+			if(ctx->gens == NULL)
+				loc_err(tok->loc, "Special variable '$@' can only be used in commands.");
+
+			iter = target_iter(ctx->gens);
+			while((target = target_next(&iter)) != NULL) {
+				if(ctx->dir != NULL) {
+					ctx_buf(ctx, ctx->dir, strlen(ctx->dir));
+					ctx_ch(ctx, '/');
+				}
+
+				ctx_bufstr(ctx, target->path);
+			}
+
+			str = find + 2;
+		}
+		else if(find[1] == '^') {
+			struct target_t *target;
+			struct target_iter_t iter;
+
+			if(ctx->deps == NULL)
+				loc_err(tok->loc, "Special variable '$^' can only be used in commands.");
+
+			iter = target_iter(ctx->deps);
+			while((target = target_next(&iter)) != NULL)
+				ctx_bufstr(ctx, target->path);
+
+			str = find + 2;
+		}
 		else if(find[1] == '{') {
-			fatal("stub");
+			char id[256];
+			struct val_t *val, *iter;
+
+			find += 2;
+			get_var(&find, id, tok->loc);
+			val = ctx_var(ctx, ns, id, tok->loc);
+
+			while(*find == '.') {
+				struct val_t **args;
+				uint32_t cnt;
+
+				args = malloc(0);
+				cnt = 0;
+
+				find++;
+				get_var(&find, id, tok->loc);
+				if(*find != '(')
+					loc_err(tok->loc, "Expected '('.");
+
+				find++;
+				if(*find != ')') {
+					for(;;) {
+						args = realloc(args, (cnt + 1) * sizeof(void *));
+						//get_str(&find, id, tok->loc);
+						args[cnt++] = ctx_var(ctx, ns, id, tok->loc);
+
+						if(*find == ')')
+							break;
+						else if(*find != ',')
+							loc_err(tok->loc, "Expected ',' or '('.");
+						
+						find++;
+					}
+				}
+
+				find++;
+				free(args);
+				fatal("stub function[%s]", id);
+			}
+
+			if(*find != '}')
+				loc_err(tok->loc, "Expected '.' or '{'.");
+
+			find++;
+
+			for(iter = val; iter != NULL; iter = iter->next) {
+				if(iter != val)
+					ctx_ch(ctx, ' ');
+
+				ctx_buf(ctx, iter->str, strlen(iter->str));
+			}
+
+			val_delete(val);
+			str = find;
 		}
 		else if(ch_alpha(find[1])) {
 			uint32_t i = 0;

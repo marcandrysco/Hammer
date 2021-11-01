@@ -5,6 +5,12 @@
 #include <stdlib.h>
 
 
+/*
+ * global declarations
+ */
+i64 os_memcnt = 0;
+
+
 /**
  * Print to the output.
  *   @fmt: The printf-style format string.
@@ -63,7 +69,7 @@ void os_exec(struct val_t *val)
 	char **args;
 
 	n = val_len(val);
-	args = mem_alloc(sizeof(void *) * (n + 1));
+	args = malloc(sizeof(void *) * (n + 1));
 	for(i = 0; i < n; i++) {
 		args[i] = strdup(val->str);
 
@@ -80,9 +86,9 @@ void os_exec(struct val_t *val)
 	wait(&stat);
 
 	for(i = 0; i < n; i++)
-		mem_free(args[i]);
+		free(args[i]);
 
-	mem_free(args);
+	free(args);
 }
 
 /**
@@ -103,44 +109,4 @@ int64_t os_mtime(const char *path)
 void os_mkdir(const char *path)
 {
 	mkdir(path, 0777);
-}
-
-
-/**
- * Allocate memory.
- *   @sz: The allocation size.
- *   &returns: The allocated pointer.
- */
-void *mem_alloc(size_t sz)
-{
-	void *ptr;
-
-	ptr = malloc(sz);
-	if(ptr == NULL)
-		fatal("Failed allocation.");
-
-	return ptr;
-}
-
-/**
- * Reallocate memory.
- *   @ptr: The memory pointer.
- *   @sz: The new size.
- */
-void *mem_realloc(void *ptr, size_t sz)
-{
-	ptr = realloc(ptr, sz);
-	if(ptr == NULL)
-		fatal("Failed allocation.");
-
-	return ptr;
-}
-
-/**
- * Free memory.
- *   @ptr: The memory pointer.
- */
-void mem_free(void *ptr)
-{
-	free(ptr);
 }

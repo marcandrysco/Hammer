@@ -28,7 +28,7 @@ void target_delete(struct target_t *target)
 	edge = target->edge;
 	while(edge != NULL) {
 		edge = (tmp = edge)->next;
-		mem_free(tmp);
+		free(tmp);
 	}
 
 	free(target->path);
@@ -59,7 +59,7 @@ void target_conn(struct target_t *target, struct rule_t *rule)
 {
 	struct edge_t *edge;
 
-	edge = mem_alloc(sizeof(struct edge_t));
+	edge = malloc(sizeof(struct edge_t));
 	edge->rule = rule;
 	edge->next = target->edge;
 	target->edge = edge;
@@ -102,7 +102,7 @@ struct target_list_t *target_list_new(void)
 {
 	struct target_list_t *list;
 
-	list = mem_alloc(sizeof(struct target_list_t));
+	list = malloc(sizeof(struct target_list_t));
 	*list = (struct target_list_t){ NULL };
 
 	return list;
@@ -119,10 +119,10 @@ void target_list_delete(struct target_list_t *list)
 	inst = list->inst;
 	while(inst != NULL) {
 		inst = (tmp = inst)->next;
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(list);
+	free(list);
 }
 
 
@@ -169,7 +169,7 @@ void target_list_add(struct target_list_t *list, struct target_t *target)
 {
 	struct target_inst_t *inst;
 
-	inst = mem_alloc(sizeof(struct target_inst_t));
+	inst = malloc(sizeof(struct target_inst_t));
 	inst->target = target;
 
 	inst->next = list->inst;
@@ -197,7 +197,7 @@ struct map_t *map_new(void)
 {
 	struct map_t *map;
 
-	map = mem_alloc(sizeof(struct map_t));
+	map = malloc(sizeof(struct map_t));
 	map->ent = NULL;
 
 	return map;
@@ -215,10 +215,10 @@ void map_delete(struct map_t *map)
 	while(ent != NULL) {
 		ent = (tmp = ent)->next;
 		target_delete(tmp->target);
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(map);
+	free(map);
 }
 
 
@@ -250,7 +250,7 @@ void map_add(struct map_t *map, struct target_t *target)
 {
 	struct ent_t *ent;
 
-	ent = mem_alloc(sizeof(struct ent_t));
+	ent = malloc(sizeof(struct ent_t));
 	ent->target = target;
 
 	ent->next = map->ent;

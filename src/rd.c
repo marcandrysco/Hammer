@@ -20,7 +20,7 @@ struct rd_t {
 /*
  * local declarations
  */
-static void str_add(char **buf, uint32_t *len, uint32_t *max, char ch);
+static void s_add(char **buf, uint32_t *len, uint32_t *max, char ch);
 
 
 /**
@@ -138,11 +138,11 @@ struct tok_t *rd_tok(struct rd_t *rd)
 			else
 				add = rd->ch;
 
-			str_add(&str, &len, &max, add);
+			s_add(&str, &len, &max, add);
 		}
 
 		rd_ch(rd);
-		str_add(&str, &len, &max, '\0');
+		s_add(&str, &len, &max, '\0');
 		str = realloc(str, len);
 
 		*tok = tok_new(TOK_STR, str, loc);
@@ -169,14 +169,14 @@ struct tok_t *rd_tok(struct rd_t *rd)
 				default: loc_err(rd->loc, "Unknown escape '\\%c'.", rd->ch);
 				}
 
-				str_add(&str, &len, &max, add);
+				s_add(&str, &len, &max, add);
 			}
 			else
-				str_add(&str, &len, &max, rd->ch);
+				s_add(&str, &len, &max, rd->ch);
 		}
 
 		rd_ch(rd);
-		str_add(&str, &len, &max, '\0');
+		s_add(&str, &len, &max, '\0');
 		str = realloc(str, len);
 
 		*tok = tok_new(TOK_STR, str, loc);
@@ -186,10 +186,10 @@ struct tok_t *rd_tok(struct rd_t *rd)
 		uint32_t len = 0, max = 32;
 
 		do
-			str_add(&str, &len, &max, rd->ch);
+			s_add(&str, &len, &max, rd->ch);
 		while(ch_id(rd_ch(rd)));
 
-		str_add(&str, &len, &max, '\0');
+		s_add(&str, &len, &max, '\0');
 		str = realloc(str, len);
 
 		*tok = tok_new(TOK_ID, str, loc);
@@ -338,57 +338,6 @@ void tok_delete(struct tok_t *tok)
 
 
 /**
- * Determine if a character is a space.
- *   @ch: The character.
- *   &returns: True if space.
- */
-bool ch_space(int ch)
-{
-	return (ch == ' ') || (ch == '\r') || (ch == '\t') || (ch == '\n') || (ch == '\v');
-}
-
-/**
- * Determine if a character is an alphabet character.
- *   @ch: The character.
- *   &returns: True if space.
- */
-bool ch_alpha(int ch)
-{
-	return ((ch >= 'A') && (ch <= 'Z')) || ((ch >= 'a') && (ch <= 'z'));
-}
-
-/**
- * Determine if a character is a numeric character.
- *   @ch: The character.
- *   &returns: True if space.
- */
-bool ch_num(int ch)
-{
-	return (ch >= '0') && (ch <= '9');
-}
-
-/**
- * Determine if a character is an alphabet or numeric character.
- *   @ch: The character.
- *   &returns: True if space.
- */
-bool ch_alnum(int ch)
-{
-	return ch_alpha(ch) || ch_num(ch);
-}
-
-/**
- * Determine if a character is part of an identifier.
- *   @ch: The character.
- *   &returns: True if an ID character.
- */
-bool ch_id(int ch)
-{
-	return !ch_space(ch) && (ch != '{') && (ch != '}') && (ch != ':') && (ch != ';') && (ch != '=');
-}
-
-
-/**
  * Generate an error at a specific location.
  *   @loc: The location.
  *   @fmt: The printf-style format string.
@@ -416,7 +365,7 @@ void loc_err(struct loc_t loc, const char *fmt, ...)
  *   @max: Ref. The buffer maximum length.
  *   @ch: The character.
  */
-static void str_add(char **buf, uint32_t *len, uint32_t *max, char ch)
+static void s_add(char **buf, uint32_t *len, uint32_t *max, char ch)
 {
 	if(*len >= *max)
 		*buf = realloc(*buf, *max = 2 * *len);

@@ -1,11 +1,11 @@
 CC      := gcc
 LD      := gcc
-CFLAGS  := -O2 -g -Wall
+CFLAGS  := -O1 -g -Wall
 LDFLAGS := 
 
 # targets and sources
 BIN := hammer
-SRC := src/main.c src/bind.c src/cli.c src/cmd.c src/ctx.c src/map.c src/ns.c src/par.c src/rd.c src/rule.c src/target.c src/back/linux.c
+SRC := src/main.c src/ast.c src/bind.c src/cli.c src/cmd.c src/ctx.c src/func.c src/eval.c src/map.c src/ns.c src/rd.c src/rule.c src/str.c src/target.c src/back/linux.c
 
 # built from sources
 OBJ := $(SRC:.c=.o)

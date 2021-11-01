@@ -6,14 +6,15 @@
  *   @id: Consumed. The identifier.
  *   @tag: The tag.
  *   @data: Consumed. The data.
+ *   @loc: The location.
  *   &returns: The binding.
  */
-struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data)
+struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data, struct loc_t loc)
 {
 	struct bind_t *bind;
 
 	bind = malloc(sizeof(struct bind_t));
-	*bind = (struct bind_t){ id, tag, data, NULL };
+	*bind = (struct bind_t){ id, tag, data, loc, NULL };
 
 	return bind;
 }
@@ -26,7 +27,7 @@ void bind_delete(struct bind_t *bind)
 {
 	switch(bind->tag) {
 	case val_v: val_clear(bind->data.val); break;
-	case rule_v: break;
+	case syn_v: cli_err("FIXME stub");
 	case ns_v: cli_err("FIXME stub");
 	}
 
@@ -41,11 +42,12 @@ void bind_delete(struct bind_t *bind)
  * Create a value binding.
  *   @id: The identifier.
  *   @val: The value.
+ *   @loc: The location.
  *   &returns: The bidning.
  */
 struct bind_t *bind_val(char *id, struct val_t *val)
 {
-	return bind_new(id, val_v, (union bind_u){ .val = val });
+	return bind_new(id, val_v, (union bind_u){ .val = val }, (struct loc_t){ });
 }
 
 /**
@@ -54,26 +56,50 @@ struct bind_t *bind_val(char *id, struct val_t *val)
  *   @rule: The rule.
  *   &returns: The bidning.
  */
-struct bind_t *bind_rule(char *id, struct rule_t *rule)
-{
-	return bind_new(id, rule_v, (union bind_u){ .rule = rule });
-}
+//struct bind_t *bind_rule(char *id, struct rule_t *rule)
+//{
+	//return bind_new(id, rule_v, (union bind_u){ .rule = rule }, (struct loc_t){ });
+//}
 
 
 /**
  * Create a value.
+ *   @spec: Special value flag.
  *   @str: Consumed. The string.
  *   &returns: The value.
  */
-struct val_t *val_new(char *str)
+struct val_t *val_new(bool spec, char *str)
 {
 	struct val_t *val;
 
 	val = malloc(sizeof(struct val_t));
+	val->spec = spec;
 	val->str = str;
 	val->next = NULL;
 
 	return val;
+}
+
+/**
+ * Duplicate a value.
+ *   @val: The value.
+ *   &returns: The duplicated value.
+ */
+struct val_t *val_dup(const struct val_t *val)
+{
+	struct val_t *ret, **iter;
+
+	iter = &ret;
+	while(val != NULL) {
+		*iter = malloc(sizeof(struct val_t));
+		(*iter)->spec = val->spec;
+		(*iter)->str = strdup(val->str);
+		iter = &(*iter)->next;
+		val = val->next;
+	}
+
+	*iter = NULL;
+	return ret;
 }
 
 /**
@@ -100,6 +126,45 @@ void val_clear(struct val_t *val)
 	}
 }
 
+
+/**
+ * Unwrap an identifier from a value.
+ *   @val: Consumed. The value.
+ *   @loc: The location.
+ *   &returns: The allocated identifier.
+ */
+char *val_id(struct val_t *val, struct loc_t loc)
+{
+	char *id;
+
+	if((val == NULL) || (val_len(val) >= 2))
+		loc_err(loc, "Invalid variable name.");
+
+	id = val->str;
+	free(val);
+
+	return id;
+}
+
+/**
+ * Unwrap an single string from a value.
+ *   @val: Consumed. The value.
+ *   @loc: The location.
+ *   &returns: The allocated identifier.
+ */
+char *val_str(struct val_t *val, struct loc_t loc)
+{
+	char *id;
+
+	if((val == NULL) || (val_len(val) >= 2))
+		loc_err(loc, "Must be a single string.");
+
+	id = val->str;
+	free(val);
+
+	return id;
+}
+
 /**
  * Retrieve the value length.
  *   @val: The value.
@@ -115,4 +180,18 @@ uint32_t val_len(struct val_t *val)
 	}
 
 	return n;
+}
+
+
+/**
+ * Finalize a value by setting the directory.
+ *   @val: The value.
+ *   @dir: The directory.
+ */
+void val_final(struct val_t *val, const char *dir)
+{
+	while(val != NULL) {
+		str_final(&val->str, dir);
+		val = val->next;
+	}
 }

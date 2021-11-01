@@ -28,7 +28,7 @@ struct set_t *set_new(void)
 {
 	struct set_t *set;
 
-	set = mem_alloc(sizeof(struct set_t));
+	set = malloc(sizeof(struct set_t));
 	set->elem = NULL;
 
 	return set;
@@ -50,10 +50,10 @@ void set_delete(struct set_t *set, void(*del)(void *))
 		if(del != NULL)
 			del(tmp->ref);
 
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(set);
+	free(set);
 }
 
 
@@ -66,43 +66,26 @@ void set_add(struct set_t *set, void *ref)
 {
 	struct elem_t *elem;
 
-	elem = mem_alloc(sizeof(struct elem_t));
+	elem = malloc(sizeof(struct elem_t));
 	elem->ref = ref;
 
 	elem->next = set->elem;
 	set->elem = elem;
 }
 
-
-/**
- * List structure.
- *   @head, tail: The head and tail links.
- */
-struct list_t {
-	struct link_t *head, **tail;
-};
-
-/**
- * Link structure.
- *   @ref: The reference.
- *   @next: The next link.
- */
-struct link_t {
-	void *ref;
-	struct link_t *next;
-};
-
 /**
  * Create a list.
+ *   @del: The value deletion function.
  *   &returns: The list.
  */
-struct list_t *list_new(void)
+struct list_t *list_new(void(*del)(void *))
 {
 	struct list_t *list;
 
-	list = mem_alloc(sizeof(struct list_t));
+	list = malloc(sizeof(struct list_t));
 	list->head = NULL;
 	list->tail = &list->head;
+	list->del = del;
 
 	return list;
 }
@@ -110,9 +93,8 @@ struct list_t *list_new(void)
 /**
  * Delete a list.
  *   @list: The list.
- *   @del: The value deletion function.
  */
-void list_delete(struct list_t *list, void(*del)(void *))
+void list_delete(struct list_t *list)
 {
 	struct link_t *link, *tmp;
 
@@ -120,27 +102,27 @@ void list_delete(struct list_t *list, void(*del)(void *))
 	while(link != NULL) {
 		link = (tmp = link)->next;
 		
-		if(del != NULL)
-			del(tmp->ref);
+		if(list->del != NULL)
+			list->del(tmp->val);
 
-		mem_free(tmp);
+		free(tmp);
 	}
 
-	mem_free(list);
+	free(list);
 }
 
 
 /**
- * Add a reference to a list.
+ * Add a value to a list.
  *   @list: The list.
- *   @ref: The reference.
+ *   @val: The value.
  */
-void list_add(struct list_t *list, void *ref)
+void list_add(struct list_t *list, void *val)
 {
 	struct link_t *link;
 
-	link = mem_alloc(sizeof(struct link_t));
-	link->ref = ref;
+	link = malloc(sizeof(struct link_t));
+	link->val = val;
 	link->next = NULL;
 
 	*list->tail = link;
@@ -165,10 +147,10 @@ struct map_t *map_new(uint32_t init)
 {
 	struct map_t *map;
 
-	map = mem_alloc(sizeof(struct map_t));
+	map = malloc(sizeof(struct map_t));
 	map->cnt = 0;
 	map->sz = init;
-	map->arr = mem_alloc(init * sizeof(void *));
+	map->arr = malloc(init * sizeof(void *));
 	memset(map->arr, 0x00, init * sizeof(void *));
 
 	map->alt = NULL;
@@ -191,8 +173,8 @@ void map_delete(struct map_t *map, size_t off, void(*del)(void *))
 	if(map->alt != NULL)
 		map_delete(map->alt, off, del);
 
-	mem_free(map->arr);
-	mem_free(map);
+	free(map->arr);
+	free(map);
 }
 
 
