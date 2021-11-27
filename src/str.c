@@ -61,6 +61,16 @@ void get_var(const char **str, char *var, struct loc_t loc)
 
 
 /**
+ * Trim whitespace from a string.
+ *   @str: The string reference.
+ */
+void str_trim(const char **str)
+{
+	while(ch_space(**str))
+		(*str)++;
+}
+
+/**
  * Create a formatted string.
  *   @pat: The printf-style pattern.
  */
@@ -137,6 +147,15 @@ void str_final(char **str, const char *dir)
 struct buf_t buf_new(uint32_t init)
 {
 	return (struct buf_t){ malloc(init), 0, init };
+}
+
+/**
+ * Delete a buffer.
+ *   @buf: The buffer.
+ */
+void buf_delete(struct buf_t *buf)
+{
+	free(buf->str);
 }
 
 /**
@@ -244,7 +263,7 @@ bool ch_var(int ch)
  */
 bool ch_str(int ch)
 {
-	return ch_alnum(ch) || (strchr("$@^<.,~/_-", ch) != NULL);
+	return ch_alnum(ch) || (strchr("~/._-", ch) != NULL);
 }
 
 /**

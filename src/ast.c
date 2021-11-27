@@ -102,6 +102,37 @@ void dir_delete(struct dir_t *dir)
 
 
 /**
+ * Create a loop.
+ *   @id: Consumed. The identifier.
+ *   @imm: Consumed. The immediate value.
+ *   @body: Consumed. The body statement.
+ *   @loc: The location.
+ *   &returns: The loop.
+ */
+struct loop_t *loop_new(char *id, struct imm_t *imm, struct stmt_t *body, struct loc_t loc)
+{
+	struct loop_t *loop;
+
+	loop = malloc(sizeof(struct loop_t));
+	*loop = (struct loop_t){ id, imm, body, loc };
+
+	return loop;
+}
+
+/**
+ * Delete a loop.
+ *   @loop: The loop.
+ */
+void loop_delete(struct loop_t *loop)
+{
+	imm_delete(loop->imm);
+	stmt_delete(loop->body);
+	free(loop->id);
+	free(loop);
+}
+
+
+/**
  * Create a map.
  *   @cmp: The comparison function.
  *   @del: The deletion function.
@@ -227,7 +258,9 @@ void stmt_delete(struct stmt_t *stmt)
 	case assign_v: assign_delete(stmt->data.assign); break;
 	case syn_v: syn_delete(stmt->data.syn); break;
 	case dir_v: dir_delete(stmt->data.dir); break;
+	case loop_v: loop_delete(stmt->data.loop); break;
 	case print_v: print_delete(stmt->data.print); break;
+	case block_v: block_delete(stmt->data.block); break;
 	}
 
 	free(stmt);
@@ -246,7 +279,6 @@ void stmt_clear(struct stmt_t *stmt)
 		stmt_delete(tmp);
 	}
 }
-
 
 
 /**
@@ -350,18 +382,18 @@ u32 imm_len(struct imm_t *imm)
 /**
  * Create an raw string.
  *   @spec: Special value flag.
- *   @quote: Quoted flag.
+ *   @var: Variable flag.
  *   @str: Consumed. The string.
  *   @loc: The location.
  *   &returns: The raw string.
  */
-struct raw_t *raw_new(bool spec, bool quote, char *str, struct loc_t loc)
+struct raw_t *raw_new(bool spec, bool var, char *str, struct loc_t loc)
 {
 	struct raw_t *raw;
 
 	raw = malloc(sizeof(struct raw_t));
 	raw->spec = spec;
-	raw->quote = quote;
+	raw->var = var;
 	raw->str = str;
 	raw->loc = loc;
 	raw->next = NULL;
@@ -376,7 +408,7 @@ struct raw_t *raw_new(bool spec, bool quote, char *str, struct loc_t loc)
  */
 struct raw_t *raw_dup(const struct raw_t *raw)
 {
-	return raw_new(raw->spec, raw->quote, strdup(raw->str), raw->loc);
+	return raw_new(raw->spec, raw->var, strdup(raw->str), raw->loc);
 }
 
 /**
@@ -413,7 +445,7 @@ void raw_clear(struct raw_t *raw)
  *   @str: The token string.
  *   @len, max: The string length and max.
  */
-struct read_t {
+struct rd_t {
 	FILE *file;
 	int ch;
 
@@ -428,20 +460,17 @@ struct read_t {
 /*
  * reader declaraions
  */
-#define rd_ch rd_ch0
-#define rd_tok rd_tok0
-#define rd_top rd_top0
-int rd_ch(struct read_t *rd);
-int rd_tok(struct read_t *rd);
+int rd_ch(struct rd_t *rd);
+int rd_tok(struct rd_t *rd);
 
-void rd_reset(struct read_t *rd);
-int rd_push(struct read_t *rd, char ch);
-int rd_buf(struct read_t *rd);
+void rd_reset(struct rd_t *rd);
+int rd_push(struct rd_t *rd, char ch);
+int rd_buf(struct rd_t *rd);
 
-struct block_t *rd_top(struct read_t *rd);
-struct stmt_t *rd_stmt(struct read_t *rd);
-struct imm_t *rd_imm(struct read_t *rd);
-struct raw_t *rd_raw(struct read_t *rd);
+struct block_t *rd_top(struct rd_t *rd);
+struct stmt_t *rd_stmt(struct rd_t *rd);
+struct imm_t *rd_imm(struct rd_t *rd);
+struct raw_t *rd_raw(struct rd_t *rd);
 
 
 /**
@@ -451,7 +480,7 @@ struct raw_t *rd_raw(struct read_t *rd);
  */
 struct block_t *ham_load(const char *path)
 {
-	struct read_t rd;
+	struct rd_t rd;
 	struct block_t *block;
 
 	rd.file = fopen(path, "r");
@@ -483,7 +512,7 @@ struct block_t *ham_load(const char *path)
  *   @rd: The reader.
  *   &returns: The next character.
  */
-int rd_ch(struct read_t *rd)
+int rd_ch(struct rd_t *rd)
 {
 	rd->ch = fgetc(rd->file);
 	if(rd->ch == '\n') {
@@ -501,7 +530,7 @@ int rd_ch(struct read_t *rd)
  * Reset the reader's string buffer.
  *   @rd: The reader.
  */
-void rd_reset(struct read_t *rd)
+void rd_reset(struct rd_t *rd)
 {
 	rd->len = 0;
 }
@@ -512,7 +541,7 @@ void rd_reset(struct read_t *rd)
  *   @ch: The character.
  *   &returns: The next character.
  */
-int rd_push(struct read_t *rd, char ch)
+int rd_push(struct rd_t *rd, char ch)
 {
 	if(rd->len >= rd->max)
 		rd->str = realloc(rd->str, rd->max *= 2);
@@ -523,11 +552,11 @@ int rd_push(struct read_t *rd, char ch)
 }
 
 /**
- * Buffer the next characte from the reader and advance.
+ * Buffer the next character from the reader and advance.
  *   @rd: The reader.
  *   &returns: The next character.
  */
-int rd_buf(struct read_t *rd)
+int rd_buf(struct rd_t *rd)
 {
 	rd_push(rd, rd->ch);
 
@@ -542,14 +571,15 @@ struct sym_t {
 #undef TOK_STR
 #undef TOK_EOF
 #define TOK_STR   0x1000
-#define TOK_QUOTE 0x1001
-#define TOK_VAR   0x1002
-#define TOK_SPEC  0x1003
+#define TOK_VAR   0x1001
+#define TOK_SPEC  0x1002
 #define TOK_DIR   0x2000
 #define TOK_FOR   0x2001
 #define TOK_IF    0x2002
-#define TOK_PRINT 0x2003
-#define TOK_DEF   0x2004
+#define TOK_ELIF  0x2003
+#define TOK_ELSE  0x2004
+#define TOK_PRINT 0x2005
+#define TOK_DEF   0x2006
 #define TOK_EOF   0x7FFF
 
 struct sym_t syms[] = {
@@ -562,21 +592,194 @@ struct sym_t syms[] = {
 };
 
 struct sym_t keys[] = {
-	{ TOK_DIR,   "dir" },
-	{ TOK_FOR,   "for" },
-	{ TOK_IF,    "if" },
-	{ TOK_PRINT, "print" },
+	{ TOK_DIR,   "dir"     },
+	{ TOK_FOR,   "for"     },
+	{ TOK_IF,    "if"      },
+	{ TOK_ELIF,  "elif"    },
+	{ TOK_ELSE,  "else"    },
+	{ TOK_PRINT, "print"   },
 	{ TOK_DEF  , "default" },
-	{ 0,         NULL }
+	{ 0,         NULL      }
 };
 
+
+bool rd_var(struct rd_t *rd);
+void rd_str(struct rd_t *rd);
+bool rd_quote1(struct rd_t *rd);
+bool rd_quote2(struct rd_t *rd);
+bool rd_escape(struct rd_t *rd);
+
+
+/**
+ * Read an escaped character.
+ *   @rd: The reader.
+ *   &returns: True if an escape character, false otherwise.
+ */
+bool rd_escape(struct rd_t *rd)
+{
+	if(rd->ch != '\\')
+		return false;
+
+	if(strchr("tn'\" $", rd_ch(rd)) == NULL)
+		loc_err(rd->loc, "Invalid escape character '\\%c'.", rd->ch);
+
+	rd_push(rd, '\\');
+	rd_buf(rd);
+
+	return true;
+}
+
+/**
+ * Read a string.
+ *   @rd: The reader.
+ */
+void rd_str(struct rd_t *rd)
+{
+	for(;;) {
+		if(rd->ch == '$')
+			rd_var(rd);
+		else if(rd->ch == '\'')
+			rd_quote1(rd);
+		else if(rd->ch == '"')
+			rd_quote2(rd);
+		else if(rd->ch == '\\')
+			rd_escape(rd);
+		else if(ch_str(rd->ch))
+			rd_buf(rd);
+		else
+			break;
+	}
+}
+
+/**
+ * Read a variable string.
+ *   @rd: The reader.
+ *   &returns: True if a variable string.
+ */
+bool rd_var(struct rd_t *rd) {
+	if(rd->ch != '$')
+		return false;
+
+	rd_buf(rd);
+	if(rd->ch == '{') {
+		rd_buf(rd);
+
+		for(;;) {
+			if(rd->ch == '\\') {
+				char ch;
+
+				switch(rd_ch(rd)) {
+				case 't': ch = '\t'; break;
+				case 'n': ch = '\n'; break;
+				case '\'': ch = '\''; break;
+				case ' ': ch = ' '; break;
+				case '"': ch = '"'; break;
+				case '$': ch = '$'; break;
+				default: loc_err(rd->tloc, "Invalid escape character '\\%c'.", rd->ch);
+				}
+
+				rd_push(rd, ch);
+				rd_ch(rd);
+			}
+			else if(rd->ch == '}')
+				break;
+			else
+				rd_buf(rd);
+		}
+
+		rd_buf(rd);
+	}
+	else if(ch_var(rd->ch)) {
+		do
+			rd_buf(rd);
+		while(ch_var(rd->ch));
+	}
+	else if(strchr("@^<~", rd->ch) != NULL)
+		rd_buf(rd);
+	else
+		loc_err(rd->loc, "Invalid variable name.");
+
+	return true;
+}
+
+/**
+ * Read a single-quoted string, including the quote.
+ *   @rd: The reader.
+ *   &returns: True if a double-quoted string.
+ */
+bool rd_quote1(struct rd_t *rd)
+{
+	if(rd->ch != '\'')
+		return false;
+
+	rd_buf(rd);
+
+	for(;;) {
+		if(rd->ch == '\\') {
+			char ch;
+
+			switch(rd_ch(rd)) {
+			case 't': ch = '\t'; break;
+			case 'n': ch = '\n'; break;
+			case '\'': ch = '\''; break;
+			case ' ': ch = ' '; break;
+			case '"': ch = '"'; break;
+			case '$': ch = '$'; break;
+			default: loc_err(rd->loc, "Invalid escape character '\\%c'.", rd->ch);
+			}
+
+			rd_push(rd, ch);
+			rd_ch(rd);
+		}
+		else if(rd->ch == '\'')
+			break;
+		else if((rd->ch == '\n') || (rd->ch < 0))
+			loc_err(rd->loc, "Unterminated quote.", rd->ch);
+		else
+			rd_buf(rd);
+	}
+
+	rd_buf(rd);
+
+	return true;
+}
+
+/**
+ * Read a double-quoted string, including the quote.
+ *   @rd: The reader.
+ *   &returns: True if a double-quoted string.
+ */
+bool rd_quote2(struct rd_t *rd)
+{
+	if(rd->ch != '"')
+		return false;
+
+	rd_buf(rd);
+
+	for(;;) {
+		if(rd->ch == '\\')
+			rd_escape(rd);
+		else if(rd->ch == '$')
+			rd_var(rd);
+		else if(rd->ch == '"')
+			break;
+		else if((rd->ch == '\n') || (rd->ch < 0))
+			loc_err(rd->loc, "Unterminated quote.", rd->ch);
+		else
+			rd_buf(rd);
+	}
+
+	rd_buf(rd);
+
+	return true;
+}
 
 /**
  * Read the next token.
  *   @rd: The reader.
  *   &returns: The token.
  */
-int rd_tok(struct read_t *rd)
+int rd_tok(struct rd_t *rd)
 {
 	char ch, peek;
 	struct sym_t *sym;
@@ -613,11 +816,8 @@ int rd_tok(struct read_t *rd)
 		return rd->tok = sym->tok;
 	}
 
-	if(ch_str(rd->ch)) {
-		do
-			rd_buf(rd);
-		while(ch_str(rd->ch));
-
+	if(ch_str(rd->ch) || (rd->ch == '$') || (rd->ch == '"') || (rd->ch == '\'')) {
+		rd_str(rd);
 		rd_push(rd, '\0');
 
 		for(sym = keys; sym->tok != 0; sym++) {
@@ -625,42 +825,10 @@ int rd_tok(struct read_t *rd)
 				return rd->tok = sym->tok;
 		}
 
-		rd->tok = (rd->str[0] == '.') ? TOK_SPEC : TOK_STR;
-	}
-	else if((rd->ch == '"') || (rd->ch == '\'')) {
-		char delim = rd->ch;
-
-		rd_ch(rd);
-
-		for(;;) {
-			if(rd->ch == '\\') {
-				char ch;
-
-				switch(rd_ch(rd)) {
-				case 't': ch = '\t'; break;
-				case 'n': ch = '\n'; break;
-				default: loc_err(rd->tloc, "Invalid escape character '\\%c'.", rd->ch);
-				}
-
-				rd_push(rd, ch);
-				rd_ch(rd);
-			}
-			else if(rd->ch == TOK_EOF)
-				loc_err(rd->tloc, "Unexpected end-of-file");
-			else if(rd->ch == '\n')
-				loc_err(rd->tloc, "Unexpected newline.");
-			else if(rd->ch == delim)
-				break;
-			else
-				rd_buf(rd);
-		}
-
-		rd->tok = TOK_QUOTE;
-		rd_ch(rd);
-		rd_push(rd, '\0');
+		return rd->tok = TOK_STR;
 	}
 	else if(rd->ch < 0)
-		rd->tok = TOK_EOF;
+		return rd->tok = TOK_EOF;
 	else
 		fatal("FIXME boo %c", rd->ch);
 
@@ -673,7 +841,7 @@ int rd_tok(struct read_t *rd)
  *   @rd: The reader.
  *   &returns: The block.
  */
-struct block_t *rd_block(struct read_t *rd)
+struct block_t *rd_block(struct rd_t *rd)
 {
 	struct block_t *block;
 	struct stmt_t **stmt;
@@ -701,7 +869,7 @@ struct block_t *rd_block(struct read_t *rd)
  *   @rd: The reader.
  *   &returns: The block.
  */
-struct block_t *rd_top(struct read_t *rd)
+struct block_t *rd_top(struct rd_t *rd)
 {
 	struct block_t *block;
 	struct stmt_t **stmt;
@@ -722,14 +890,14 @@ struct block_t *rd_top(struct read_t *rd)
  *   @rd: The reader.
  *   &returns: The statement.
  */
-struct stmt_t *rd_stmt(struct read_t *rd)
+struct stmt_t *rd_stmt(struct rd_t *rd)
 {
 	struct loc_t loc;
 	enum stmt_e tag;
 	union stmt_u data;
 
 	loc = rd->loc;
-	if((rd->tok == TOK_STR) || (rd->tok == TOK_QUOTE) || (rd->tok == TOK_SPEC)) {
+	if((rd->tok == TOK_STR) || (rd->tok == TOK_SPEC) || (rd->tok == TOK_VAR)) {
 		struct imm_t *lhs, *rhs;
 
 		lhs = rd_imm(rd);
@@ -801,6 +969,26 @@ struct stmt_t *rd_stmt(struct read_t *rd)
 
 		data.dir = dir_new(def, raw, block);
 	}
+	else if(rd->tok == TOK_FOR) {
+		char *id;
+		struct imm_t *imm;
+		struct stmt_t *body;
+		struct loc_t loc = rd->tloc;
+
+		if(rd_tok(rd) != TOK_STR)
+			loc_err(rd->tloc, "Expected variable name.");
+
+		id = strdup(rd->str);
+		if(rd_tok(rd) != ':')
+			loc_err(rd->tloc, "Expected ':'.");
+
+		rd_tok(rd);
+		imm = rd_imm(rd);
+		body = rd_stmt(rd);
+
+		tag = loop_v;
+		data.loop = loop_new(id, imm, body, loc);
+	}
 	else if(rd->tok == TOK_PRINT) {
 		tag = print_v;
 		rd_tok(rd);
@@ -809,6 +997,10 @@ struct stmt_t *rd_stmt(struct read_t *rd)
 			loc_err(rd->tloc, "Expected ';'.");
 
 		rd_tok(rd);
+	}
+	else if(rd->tok == '{') {
+		tag = block_v;
+		data.block = rd_block(rd);
 	}
 	else
 		loc_err(rd->tloc, "Expected statement.", rd->tok, rd->tok);
@@ -821,7 +1013,7 @@ struct stmt_t *rd_stmt(struct read_t *rd)
  *   @rd: The reader.
  *   &returns: The list.
  */
-struct imm_t *rd_imm(struct read_t *rd)
+struct imm_t *rd_imm(struct rd_t *rd)
 {
 	struct imm_t *imm;
 	struct raw_t **raw;
@@ -840,14 +1032,14 @@ struct imm_t *rd_imm(struct read_t *rd)
  *   @rd: The reader.
  *   &returns: The raw string if found, null otherwise.
  */
-struct raw_t *rd_raw(struct read_t *rd)
+struct raw_t *rd_raw(struct rd_t *rd)
 {
 	struct raw_t *raw;
 
-	if((rd->tok != TOK_STR) && (rd->tok != TOK_QUOTE) && (rd->tok != TOK_SPEC))
+	if((rd->tok != TOK_STR) && (rd->tok != TOK_SPEC) && (rd->tok != TOK_VAR))
 		return NULL;
 
-	raw = raw_new(rd->tok == TOK_SPEC, rd->tok == TOK_QUOTE, strdup(rd->str), rd->tloc);
+	raw = raw_new(rd->tok == TOK_SPEC, rd->tok == TOK_VAR, strdup(rd->str), rd->tloc);
 	rd_tok(rd);
 
 	return raw;

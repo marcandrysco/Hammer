@@ -27,14 +27,36 @@ void bind_delete(struct bind_t *bind)
 {
 	switch(bind->tag) {
 	case val_v: val_clear(bind->data.val); break;
-	case syn_v: cli_err("FIXME stub");
+	case func_v: break;
 	case ns_v: cli_err("FIXME stub");
 	}
 
-	if(bind->id != NULL)
-		free(bind->id);
-
+	free(bind->id);
 	free(bind);
+}
+
+/**
+ * Delete a binding if non-null.
+ *   @bind: The bind.
+ */
+void bind_erase(struct bind_t *bind)
+{
+	if(bind != NULL)
+		bind_delete(bind);
+}
+
+
+/**
+ * Set a new binding, replacing the old value.
+ *   @dst: The destination.
+ *   @src: The source.
+ */
+void bind_set(struct bind_t **dst, struct bind_t *src)
+{
+	if(*dst != NULL)
+		bind_delete(*dst);
+
+	*dst = src;
 }
 
 
@@ -43,7 +65,7 @@ void bind_delete(struct bind_t *bind)
  *   @id: The identifier.
  *   @val: The value.
  *   @loc: The location.
- *   &returns: The bidning.
+ *   &returns: The binding.
  */
 struct bind_t *bind_val(char *id, struct val_t *val)
 {
@@ -51,15 +73,15 @@ struct bind_t *bind_val(char *id, struct val_t *val)
 }
 
 /**
- * Create a rule binding.
+ * Create a function binding.
  *   @id: The identifier.
  *   @rule: The rule.
- *   &returns: The bidning.
+ *   &returns: The binding.
  */
-//struct bind_t *bind_rule(char *id, struct rule_t *rule)
-//{
-	//return bind_new(id, rule_v, (union bind_u){ .rule = rule }, (struct loc_t){ });
-//}
+struct bind_t *bind_func(char *id, func_t *func)
+{
+	return bind_new(id, func_v, (union bind_u){ .func = func }, (struct loc_t){ });
+}
 
 
 /**

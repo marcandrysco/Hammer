@@ -39,3 +39,35 @@ uint64_t hash64(uint64_t hash, const char *str)
 
 	return hash;
 }
+
+
+/**
+ * Compute an offset from a location.
+ *   @loc: The location.
+ *   @off: The offset.
+ *   &returns: The new location.
+ */
+struct loc_t loc_off(struct loc_t loc, uint32_t off)
+{
+	return (struct loc_t){ loc.path, loc.lin, loc.col + off };
+}
+
+/**
+ * Generate an error at a specific location.
+ *   @loc: The location.
+ *   @fmt: The printf-style format string.
+ *   @...: The printf-style arguments.
+ *   @noreturn
+ */
+void loc_err(struct loc_t loc, const char *fmt, ...)
+{
+	va_list args;
+
+	va_start(args, fmt);
+	fprintf(stderr, "%s:%u:%u: ", loc.path, loc.lin, loc.col);
+	vfprintf(stderr, fmt, args);
+	fprintf(stderr, "\n");
+	va_end(args);
+
+	exit(1);
+}

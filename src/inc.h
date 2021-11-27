@@ -36,6 +36,7 @@ struct seq_t;
 struct set_t;
 struct target_t;
 struct target_list_t;
+struct val_t;
 
 struct loc_t;
 struct tok_t;
@@ -43,6 +44,8 @@ struct val_t;
 
 typedef int(*cmp_f)(const void *, const void *);
 typedef void(*del_f)(void *);
+
+typedef struct val_t *(func_t)(struct val_t **args, uint32_t cnt, struct loc_t loc);
 
 /*
  * common declarations
@@ -66,6 +69,13 @@ void fatal(const char *fmt, ...) __attribute__((noreturn));
 void os_exec(struct val_t *val);
 int64_t os_mtime(const char *path);
 void os_mkdir(const char *path);
+
+/*
+ * argument declarations
+ */
+void args_init(struct val_t ***args, uint32_t *cnt);
+void args_add(struct val_t ***args, uint32_t *cnt, struct val_t *val);
+void args_delete(struct val_t **args, uint32_t cnt);
 
 /*
  * set declarations
@@ -121,8 +131,7 @@ struct opt_t {
  *   @map: The target map.
  *   @rules: The set of rules.
  *   @gen, dep: The generator and depedency values.
- *   @str, dir: The working string and selected directory.
- *   @len, max: The length and maximum.
+ *   @dir: The selected directory.
  *   @gen, deps: The generated and dependency targets.
  */
 struct ctx_t {
@@ -132,8 +141,7 @@ struct ctx_t {
 	struct rule_list_t *rules;
 
 	struct val_t *gen, *dep;
-	char *str, *dir;
-	uint32_t len, max;
+	struct bind_t *dir;
 
 	struct target_list_t *gens, *deps;
 };
@@ -148,8 +156,6 @@ void ctx_run(struct ctx_t *ctx, const char **builds);
 
 struct target_t *ctx_target(struct ctx_t *ctx, bool spec, const char *path);
 struct rule_t *ctx_rule(struct ctx_t *ctx, const char *id, struct target_list_t *gens, struct target_list_t *deps, struct seq_t *seq);
-
-const char *ctx_str(struct ctx_t *ctx, struct ns_t *ns, struct tok_t *tok);
 
 
 /**
@@ -424,22 +430,9 @@ void cli_err(const char *fmt, ...) __attribute__((noreturn));
 
 
 /*
- * reader declarations
- */
-struct rd_t *rd_open(const char *path);
-void rd_close(struct rd_t *rd);
-
-char rd_ch(struct rd_t *rd);
-struct tok_t *rd_tok(struct rd_t *rd);
-struct tok_t *rd_top(struct rd_t *rd);
-struct tok_t *rd_get(struct rd_t *rd, int idx);
-struct tok_t *rd_adv(struct rd_t *rd, uint32_t cnt);
-
-void rd_err(struct rd_t *rd, const char *fmt, ...) __attribute__((noreturn));
-
-/*
  * location declarations
  */
+struct loc_t loc_off(struct loc_t loc, uint32_t off);
 void loc_err(struct loc_t loc, const char *fmt, ...) __attribute__((noreturn));
 
 
@@ -511,8 +504,8 @@ void val_final(struct val_t *val, const char *dir);
  *   @loc: The location.
  *   @next: The next binding.
  */
-enum bind_e { val_v, rule_v, ns_v };
-union bind_u { struct val_t *val; struct syn_t *syn; };
+enum bind_e { val_v, func_v, ns_v };
+union bind_u { struct val_t *val; func_t *func; };
 struct bind_t {
 	char *id;
 
@@ -529,9 +522,12 @@ struct bind_t {
  */
 struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data, struct loc_t loc);
 void bind_delete(struct bind_t *bind);
+void bind_erase(struct bind_t *bind);
+
+void bind_set(struct bind_t **dst, struct bind_t *src);
 
 struct bind_t *bind_val(char *id, struct val_t *val);
-//struct bind_t *bind_rule(char *id, struct rule_t *rule);
+struct bind_t *bind_func(char *id, func_t *func);
 
 /*
  * string converstion declarations
@@ -542,6 +538,7 @@ void get_var(const char **str, char *var, struct loc_t loc);
 /*
  * string declarations
  */
+void str_trim(const char **str);
 char *str_fmt(const char *pat, ...);
 void str_set(char **dst, char *src);
 void str_final(char **str, const char *dir);
@@ -561,6 +558,7 @@ struct buf_t {
  * string declarations
  */
 struct buf_t buf_new(uint32_t init);
+void buf_delete(struct buf_t *buf);
 char *buf_done(struct buf_t *buf);
 
 void buf_ch(struct buf_t *buf, char ch);
@@ -667,14 +665,40 @@ void dir_delete(struct dir_t *dir);
 
 
 /**
+ * Conditional structure.
+ */
+struct cond_t {
+};
+
+
+/**
+ * Loop structure.
+ *   @id: Variable binding identifier.
+ *   @imm: The immediate value.
+ *   @body: The body statement.
+ *   @loc: The location.
+ */
+struct loop_t {
+	char *id;
+	struct imm_t *imm;
+	struct stmt_t *body;
+
+	struct loc_t loc;
+};
+
+struct loop_t *loop_new(char *id, struct imm_t *imm, struct stmt_t *body, struct loc_t loc);
+void loop_delete(struct loop_t *loop);
+
+
+/**
  * Statement structure.
  *   @tag: The tag.
  *   @data: The data.
  *   @loc: The location.
  *   @next: The next statement.
  */
-enum stmt_e { assign_v, syn_v, dir_v, print_v };
-union stmt_u { struct assign_t *assign; struct syn_t *syn; struct dir_t *dir; struct print_t *print; };
+enum stmt_e { assign_v, syn_v, dir_v, loop_v, print_v, block_v };
+union stmt_u { struct assign_t *assign; struct syn_t *syn; struct dir_t *dir; struct cond_t *conf; struct loop_t *loop; struct print_t *print; struct block_t *block; };
 struct stmt_t {
 	enum stmt_e tag;
 	union stmt_u data;
@@ -742,13 +766,13 @@ u32 imm_len(struct imm_t *imm);
 
 /**
  * Raw string structure.
- *   @spec, quote: Special and quote flags.
+ *   @spec, var: Special and variable flags.
  *   @str: The string.
  *   @loc: The location.
  *   @next: The next raw string.
  */
 struct raw_t {
-	bool spec, quote;
+	bool spec, var;
 
 	char *str;
 	struct loc_t loc;
@@ -759,7 +783,7 @@ struct raw_t {
 /*
  * raw value declarations
  */
-struct raw_t *raw_new(bool spec, bool quote, char *str, struct loc_t loc);
+struct raw_t *raw_new(bool spec, bool var, char *str, struct loc_t loc);
 struct raw_t *raw_dup(const struct raw_t *raw);
 void raw_delete(struct raw_t *raw);
 void raw_clear(struct raw_t *raw);
@@ -794,6 +818,12 @@ void env_delete(struct env_t env);
 
 struct bind_t *env_get(struct env_t *env, const char *id);
 void env_put(struct env_t *env, struct bind_t *bind);
+
+/*
+ * builtin function declarations
+ */
+struct val_t *fn_sub(struct val_t **args, uint32_t cnt, struct loc_t loc);
+struct val_t *fn_pat(struct val_t **args, uint32_t cnt, struct loc_t loc);
 
 
 /**
