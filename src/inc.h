@@ -66,7 +66,7 @@ void print(const char *fmt, ...);
 void printv(const char *fmt, va_list args);
 void fatal(const char *fmt, ...) __attribute__((noreturn));
 
-void os_exec(struct val_t *val);
+void os_exec(struct cmd_t *cmd);
 int64_t os_mtime(const char *path);
 void os_mkdir(const char *path);
 
@@ -362,10 +362,15 @@ struct seq_t {
 /**
  * Command structure.
  *   @val: The value.
+ *   @in, out: The input and output files.
+ *   @append: Append mode.
  *   @next: The next value.
  */
 struct cmd_t {
 	struct val_t *val;
+	char *in, *out;
+	bool append;
+
 	struct cmd_t *next;
 };
 
@@ -375,7 +380,7 @@ struct cmd_t {
 struct seq_t *seq_new(void);
 void seq_delete(struct seq_t *seq);
 
-void seq_add(struct seq_t *seq, struct val_t *val);
+void seq_add(struct seq_t *seq, struct val_t *val, char *in, char *out, bool append);
 
 
 /************************/
@@ -493,8 +498,6 @@ char *val_id(struct val_t *val, struct loc_t loc);
 char *val_str(struct val_t *val, struct loc_t loc);
 uint32_t val_len(struct val_t *val);
 
-void val_final(struct val_t *val, const char *dir);
-
 
 /**
  * Binding structure.
@@ -576,11 +579,6 @@ bool ch_var(int ch);
 bool ch_str(int ch);
 bool ch_id(int ch);
 
-/*
- * string type declarations
- */
-bool is_var(const char *str);
-
 
 /**
  * Namespace structure.
@@ -627,6 +625,7 @@ void block_delete(struct block_t *block);
  * Syntatic rule structure.
  *   @gen, dep: The generator and dependency values.
  *   @cmd: The list of commands.
+ *   @in, out: The input and output redirect.
  *   @loc: The location.
  */
 struct syn_t {
@@ -643,6 +642,24 @@ struct syn_t *syn_new(struct imm_t *gen, struct imm_t *dep, struct loc_t loc);
 void syn_delete(struct syn_t *syn);
 
 void syn_add(struct syn_t *syn, struct imm_t *cmd);
+
+/**
+ * Processing statement structure.
+ *   @imm: The command as an immediate.
+ *   @in, out: The redirect input and output.
+ *   @append: The append flag.
+ */
+struct proc_t {
+	struct imm_t *imm;
+	struct raw_t *in, *out;
+	bool append;
+};
+
+/*
+ * processing statement declarations
+ */
+struct proc_t *proc_new(struct imm_t *imm);
+void proc_delete(struct proc_t *proc);
 
 
 /**

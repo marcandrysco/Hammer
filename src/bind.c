@@ -203,17 +203,3 @@ uint32_t val_len(struct val_t *val)
 
 	return n;
 }
-
-
-/**
- * Finalize a value by setting the directory.
- *   @val: The value.
- *   @dir: The directory.
- */
-void val_final(struct val_t *val, const char *dir)
-{
-	while(val != NULL) {
-		str_final(&val->str, dir);
-		val = val->next;
-	}
-}

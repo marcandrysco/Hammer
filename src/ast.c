@@ -41,7 +41,7 @@ struct syn_t *syn_new(struct imm_t *gen, struct imm_t *dep, struct loc_t loc)
 	syn->gen = gen;
 	syn->dep = dep;
 	syn->loc = loc;
-	syn->cmd = list_new((del_f)imm_delete);
+	syn->cmd = list_new((del_f)proc_delete);
 
 	return syn;
 }
@@ -56,6 +56,40 @@ void syn_delete(struct syn_t *syn)
 	imm_delete(syn->dep);
 	list_delete(syn->cmd);
 	free(syn);
+}
+
+
+/**
+ * Create a new processing statement.
+ *   @imm: The immediate value.
+ *   &returns: The processing statement.
+ */
+struct proc_t *proc_new(struct imm_t *imm)
+{
+	struct proc_t *proc;
+
+	proc = malloc(sizeof(struct proc_t));
+	proc->imm = imm;
+	proc->in = proc->out = NULL;
+	proc->append = false;
+
+	return proc;
+}
+
+/**
+ * Delete a processing statement.
+ *   @proc: The processing statement.
+ */
+void proc_delete(struct proc_t *proc)
+{
+	if(proc->in != NULL)
+		raw_delete(proc->in);
+
+	if(proc->out != NULL)
+		raw_delete(proc->out);
+
+	imm_delete(proc->imm);
+	free(proc);
 }
 
 
@@ -580,15 +614,21 @@ struct sym_t {
 #define TOK_ELSE  0x2004
 #define TOK_PRINT 0x2005
 #define TOK_DEF   0x2006
+#define TOK_SHR   0x3000
+#define TOK_SHL   0x3001
 #define TOK_EOF   0x7FFF
 
 struct sym_t syms[] = {
-	{ '{', "{" },
-	{ '}', "}" },
-	{ ':', ":" },
-	{ ';', ";" },
-	{ '=', "=" },
-	{ 0,   NULL }
+	{ TOK_SHR, ">>" },
+	{ TOK_SHL, "<<" },
+	{ '{',     "{" },
+	{ '}',     "}" },
+	{ ':',     ":" },
+	{ ';',     ";" },
+	{ '=',     "=" },
+	{ '<',     "<" },
+	{ '>',     ">" },
+	{ 0,       NULL }
 };
 
 struct sym_t keys[] = {
@@ -813,6 +853,7 @@ int rd_tok(struct rd_t *rd)
 		else if(sym->str[1] != peek)
 			continue;
 
+		rd_ch(rd);
 		return rd->tok = sym->tok;
 	}
 
@@ -930,9 +971,28 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			if(rd->tok == '{') {
 				rd_tok(rd);
 				while(rd->tok != '}') {
-					list_add(data.syn->cmd, rd_imm(rd));
-					if(rd->tok != ';')
-						loc_err(rd->tloc, "Expected ';'.");
+					struct proc_t *proc;
+
+					proc = proc_new(rd_imm(rd));
+					list_add(data.syn->cmd, proc);
+
+					while(rd->tok != ';') {
+						if((rd->tok == '>') || (rd->tok == TOK_SHR)) {
+							if(proc->out != NULL)
+								loc_err(rd->tloc, "Output direct already given.");
+
+							if(rd->tok == TOK_SHR)
+								proc->append = true;
+
+							rd_tok(rd);
+							proc->out = rd_raw(rd);
+							if(proc->out == NULL)
+								loc_err(rd->tloc, "Missing output file path.");
+
+						}
+						else
+							loc_err(rd->tloc, "Expected ';'.");
+					}
 
 					rd_tok(rd);
 				}

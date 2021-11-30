@@ -263,7 +263,7 @@ bool ch_var(int ch)
  */
 bool ch_str(int ch)
 {
-	return ch_alnum(ch) || (strchr("~/._-", ch) != NULL);
+	return ch_alnum(ch) || (strchr("~/._-+", ch) != NULL);
 }
 
 /**
@@ -274,25 +274,4 @@ bool ch_str(int ch)
 bool ch_id(int ch)
 {
 	return !ch_space(ch) && (ch != '{') && (ch != '}') && (ch != ':') && (ch != ';') && (ch != '=');
-}
-
-
-/**
- * Determine if a string is a variable.
- *   @str: The string.
- *   &returns: True if a variable.
- */
-bool is_var(const char *str)
-{
-	u32 i;
-
-	if(str[0] != '$')
-		return false;
-
-	for(i = 1; str[i] != '\0'; i++) {
-		if(!ch_var(str[i]))
-			return false;
-	}
-
-	return true;
 }

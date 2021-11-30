@@ -60,6 +60,7 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 		struct target_list_t *gens, *deps;
 		struct val_t *gen, *dep, *iter;
 		struct link_t *link;
+		struct proc_t *proc;
 
 		seq = seq_new();
 		gens = target_list_new();
@@ -75,8 +76,15 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 
 		ctx->gen = gen;
 		ctx->dep = dep;
-		for(link = syn->cmd->head; link != NULL; link = link->next)
-			seq_add(seq, eval_imm(link->val, ctx, env));
+		for(link = syn->cmd->head; link != NULL; link = link->next) {
+			char *out, *in;
+
+			proc = link->val;
+			in = proc->in ? val_str(eval_raw(proc->in, ctx, env), syn->loc) : NULL;
+			out = proc->out ? val_str(eval_raw(proc->out, ctx, env), syn->loc) : NULL;
+
+			seq_add(seq, eval_imm(proc->imm, ctx, env), in, out, proc->append);
+		}
 
 		ctx->gen = ctx->dep = NULL;
 		val_clear(gen);

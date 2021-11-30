@@ -112,7 +112,7 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 			}
 
 			for(cmd = rule->seq->head; cmd != NULL; cmd = cmd->next)
-				os_exec(cmd->val);
+				os_exec(cmd);
 		}
 
 		iter = target_iter(rule->gens);
@@ -176,7 +176,8 @@ struct rule_t *ctx_rule(struct ctx_t *ctx, const char *id, struct target_list_t 
 			if(target->rule != NULL)
 				fatal("FIXME target already had rule, better error");
 
-			target->rule = rule;
+			if((target->flags & FLAG_SPEC) == 0)
+				target->rule = rule;
 		}
 
 		iter = target_iter(deps);
