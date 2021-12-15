@@ -16,14 +16,14 @@
 /*
  * shorter type names
  */
-typedef int32_t i32;
-typedef uint32_t u32;
 typedef int64_t i64;
 typedef uint64_t u64;
 
 /*
  * structure prototypes
  */
+struct ast_cmd_t;
+struct ast_pipe_t;
 struct cmd_t;
 struct ctx_t;
 struct env_t;
@@ -32,6 +32,7 @@ struct queue_t;
 struct ns_t;
 struct rd_t;
 struct rule_t;
+struct rt_pipe_t;
 struct seq_t;
 struct set_t;
 struct target_t;
@@ -66,7 +67,9 @@ void print(const char *fmt, ...);
 void printv(const char *fmt, va_list args);
 void fatal(const char *fmt, ...) __attribute__((noreturn));
 
-void os_exec(struct cmd_t *cmd);
+void os_init(void);
+int os_exec(struct cmd_t *cmd);
+int os_wait(void);
 int64_t os_mtime(const char *path);
 void os_mkdir(const char *path);
 
@@ -118,10 +121,12 @@ void list_add(struct list_t *list, void *val);
 /**
  * Options structure.
  *   @force: Force rebuild.
+ *   @jobs: The number of jobs.
  *   @dir: The selected directory.
  */
 struct opt_t {
 	bool force;
+	int jobs;
 	const char *dir;
 };
 
@@ -361,13 +366,13 @@ struct seq_t {
 
 /**
  * Command structure.
- *   @val: The value.
+ *   @pipe: The command pipe.
  *   @in, out: The input and output files.
  *   @append: Append mode.
  *   @next: The next value.
  */
 struct cmd_t {
-	struct val_t *val;
+	struct rt_pipe_t *pipe;
 	char *in, *out;
 	bool append;
 
@@ -380,7 +385,25 @@ struct cmd_t {
 struct seq_t *seq_new(void);
 void seq_delete(struct seq_t *seq);
 
-void seq_add(struct seq_t *seq, struct val_t *val, char *in, char *out, bool append);
+void seq_add(struct seq_t *seq, struct rt_pipe_t *pipe, char *in, char *out, bool append);
+
+
+/**
+ * Pipe structure.
+ *   @cmd: The command.
+ *   @next: The next pipe.
+ */
+struct rt_pipe_t {
+	struct val_t *cmd;
+	struct rt_pipe_t *next;
+};
+
+/*
+ * pipe declarations
+ */
+struct rt_pipe_t *rt_pipe_new(struct val_t *cmd);
+void rt_pipe_clear(struct rt_pipe_t *pipe);
+
 
 
 /************************/
@@ -442,38 +465,6 @@ void loc_err(struct loc_t loc, const char *fmt, ...) __attribute__((noreturn));
 
 
 /**
- * Token structure.
- *   @id, len: The identifier and length.
- *   @buf: The string buffer.
- *   @loc: The location information.
- *   @next: The next token.
- */
-struct tok_t {
-	uint32_t id;
-	char *str;
-	struct loc_t loc;
-
-	struct tok_t *next;
-};
-
-/*
- * token definitions
- */
-#define TOK_ID   (0x1000)
-#define TOK_STR  (0x1001)
-#define TOK_STR2 (0x1002)
-#define TOK_EOF  (0xFFFF)
-
-/*
- * token declaratinos
- */
-struct tok_t *tok_new(uint32_t id, char *str, struct loc_t loc);
-void tok_delete(struct tok_t *tok);
-
-void tok_err(struct tok_t *tok, const char *fmt, ...);
-
-
-/**
  * Value structure.
  *   @spec: Special flag.
  *   @str: The string.
@@ -529,6 +520,9 @@ void bind_erase(struct bind_t *bind);
 
 void bind_set(struct bind_t **dst, struct bind_t *src);
 
+void bind_reset(struct bind_t *bind, enum bind_e tag, union bind_u data, struct loc_t loc);
+void bind_reval(struct bind_t *bind, struct val_t *val, struct loc_t loc);
+
 struct bind_t *bind_val(char *id, struct val_t *val);
 struct bind_t *bind_func(char *id, func_t *func);
 
@@ -565,7 +559,7 @@ void buf_delete(struct buf_t *buf);
 char *buf_done(struct buf_t *buf);
 
 void buf_ch(struct buf_t *buf, char ch);
-void buf_mem(struct buf_t *buf, const char *mem, u32 len);
+void buf_mem(struct buf_t *buf, const char *mem, uint32_t len);
 void buf_str(struct buf_t *buf, const char *str);
 
 /*
@@ -643,14 +637,15 @@ void syn_delete(struct syn_t *syn);
 
 void syn_add(struct syn_t *syn, struct imm_t *cmd);
 
+
 /**
  * Processing statement structure.
- *   @imm: The command as an immediate.
+ *   @pipe: The list of piped commands.
  *   @in, out: The redirect input and output.
  *   @append: The append flag.
  */
-struct proc_t {
-	struct imm_t *imm;
+struct ast_cmd_t {
+	struct ast_pipe_t *pipe;
 	struct raw_t *in, *out;
 	bool append;
 };
@@ -658,8 +653,25 @@ struct proc_t {
 /*
  * processing statement declarations
  */
-struct proc_t *proc_new(struct imm_t *imm);
-void proc_delete(struct proc_t *proc);
+struct ast_cmd_t *ast_cmd_new(struct ast_pipe_t *pipe);
+void ast_cmd_delete(struct ast_cmd_t *cmd);
+
+
+/**
+ * Pipe statement.
+ *   @imm: The immediate value.
+ *   @next: The next pipe.
+ */
+struct ast_pipe_t {
+	struct imm_t *imm;
+	struct ast_pipe_t *next;
+};
+
+/*
+ * pipe declarations
+ */
+struct ast_pipe_t *ast_pipe_new(struct imm_t *imm);
+void ast_pipe_clear(struct ast_pipe_t *bar);
 
 
 /**
@@ -751,16 +763,18 @@ void print_delete(struct print_t *print);
  * Assignment structure.
  *   @id: The identifier.
  *   @val: The value.
+ *   @add: The append flag.
  */
 struct assign_t {
 	struct raw_t *id;
 	struct imm_t *val;
+	bool add;
 };
 
 /*
  * assignment declarations
  */
-struct assign_t *assign_new(struct raw_t *id, struct imm_t *val);
+struct assign_t *assign_new(struct raw_t *id, struct imm_t *val, bool add);
 void assign_delete(struct assign_t *assign);
 
 
@@ -778,7 +792,7 @@ struct imm_t {
 struct imm_t *imm_new(void);
 void imm_delete(struct imm_t *imm);
 
-u32 imm_len(struct imm_t *imm);
+uint32_t imm_len(struct imm_t *imm);
 
 
 /**
@@ -835,6 +849,48 @@ void env_delete(struct env_t env);
 
 struct bind_t *env_get(struct env_t *env, const char *id);
 void env_put(struct env_t *env, struct bind_t *bind);
+
+
+
+/**
+ * Job structure.
+ *   @pid: The pid.
+ *   @rule: The rule.
+ *   @cmd: The current command.
+ */
+struct job_t {
+	int pid;
+	struct rule_t *rule;
+	struct cmd_t *cmd;
+};
+
+/**
+ * Job control structure.
+ *   @queue: The rule queue.
+ *   @job: The job array.
+ *   @cnt: The number of jobs.
+ */
+struct ctrl_t {
+	struct queue_t *queue;
+
+	struct job_t *job;
+	uint32_t cnt;
+};
+
+/*
+ * job control declarations
+ */
+struct ctrl_t *ctrl_new(struct queue_t *queue, uint32_t n);
+void ctrl_delete(struct ctrl_t *ctrl);
+
+void ctrl_add(struct ctrl_t *ctrl, struct rule_t *rule);
+bool ctrl_avail(struct ctrl_t *ctrl);
+bool ctrl_busy(struct ctrl_t *ctrl);
+void ctrl_wait(struct ctrl_t *ctrl);
+void ctrl_done(struct ctrl_t *ctrl, struct rule_t *rule);
+
+int ctrl_exec(struct cmd_t *cmd);
+
 
 /*
  * builtin function declarations

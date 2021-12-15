@@ -41,11 +41,13 @@ void ctx_delete(struct ctx_t *ctx)
  */
 void ctx_run(struct ctx_t *ctx, const char **builds)
 {
+	struct ctrl_t *ctrl;
 	struct rule_t *rule;
 	struct rule_iter_t irule;
 	struct queue_t *queue;
 
 	queue = queue_new();
+	ctrl = ctrl_new(queue, 4);
 
 	irule = rule_iter(ctx->rules);
 	while((rule = rule_next(&irule)) != NULL) {
@@ -65,9 +67,19 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 		}
 	}
 
-	while((rule = queue_rem(queue)) != NULL) {
-		struct cmd_t *cmd;
-		struct edge_t *edge;
+	for(;;) {
+		while(!ctrl_avail(ctrl))
+			ctrl_wait(ctrl);
+
+		rule = queue_rem(queue);
+		if(rule == NULL) {
+			if(!ctrl_busy(ctrl))
+				break;
+
+			ctrl_wait(ctrl);
+			continue;
+		}
+
 		struct target_t *target;
 		struct target_iter_t iter;
 		int64_t min = INT64_MAX - 1, max = INT64_MIN + 1;
@@ -75,7 +87,7 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 		iter = target_iter(rule->gens);
 		while((target = target_next(&iter)) != NULL) {
 			if(target->flags & FLAG_SPEC)
-				min = INT64_MIN;
+				min = INT64_MIN, max = INT64_MAX;
 
 			if(target_mtime(target) < min)
 				min = target_mtime(target);
@@ -90,6 +102,7 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 				max = target_mtime(target);
 		}
 
+		iter = target_iter(rule->gens);
 		if((max > min) || ctx->opt->force) {
 			iter = target_iter(rule->gens);
 			while((target = target_next(&iter)) != NULL) {
@@ -111,21 +124,17 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
 				free(path);
 			}
 
-			for(cmd = rule->seq->head; cmd != NULL; cmd = cmd->next)
-				os_exec(cmd);
+			ctrl_add(ctrl, rule);
 		}
-
-		iter = target_iter(rule->gens);
-		while((target = target_next(&iter)) != NULL) {
-			for(edge = target->edge; edge != NULL; edge = edge->next) {
-				edge->rule->edges--;
-				if(edge->rule->edges == 0)
-					queue_add(queue, edge->rule);
-			}
-		}
+		else
+			ctrl_done(ctrl, rule);
 	}
 
+	while(ctrl_busy(ctrl))
+		ctrl_wait(ctrl);
+
 	queue_delete(queue);
+	ctrl_delete(ctrl);
 }
 
 
@@ -176,8 +185,7 @@ struct rule_t *ctx_rule(struct ctx_t *ctx, const char *id, struct target_list_t 
 			if(target->rule != NULL)
 				fatal("FIXME target already had rule, better error");
 
-			if((target->flags & FLAG_SPEC) == 0)
-				target->rule = rule;
+			target->rule = rule;
 		}
 
 		iter = target_iter(deps);

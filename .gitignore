@@ -1,6 +1,8 @@
 *.o
 *.d
 *.swp
-hammer.c
-hammer.sh
+bld/
+
+*.tar.xz
+
 hammer.cache

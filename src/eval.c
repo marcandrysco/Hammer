@@ -46,12 +46,23 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 	case assign_v: {
 		char *id;
 		struct val_t *val;
+		struct bind_t *bind;
 		struct assign_t *assign = stmt->data.assign;
 
 		id = val_id(eval_raw(assign->id, ctx, env), stmt->loc);
 		val = eval_imm(assign->val, ctx, env);
 
-		env_put(env, bind_val(id, val));
+		bind = env_get(env, id);
+		if(bind != NULL) {
+			if(assign->add) {
+
+				free(id);
+			}
+			else
+				bind_reval(bind, val);
+		}
+		else
+			env_put(env, bind_val(id, val));
 	} break;
 
 	case syn_v: {
@@ -60,7 +71,7 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 		struct target_list_t *gens, *deps;
 		struct val_t *gen, *dep, *iter;
 		struct link_t *link;
-		struct proc_t *proc;
+		struct ast_cmd_t *proc;
 
 		seq = seq_new();
 		gens = target_list_new();
@@ -83,7 +94,15 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 			in = proc->in ? val_str(eval_raw(proc->in, ctx, env), syn->loc) : NULL;
 			out = proc->out ? val_str(eval_raw(proc->out, ctx, env), syn->loc) : NULL;
 
-			seq_add(seq, eval_imm(proc->imm, ctx, env), in, out, proc->append);
+			struct ast_pipe_t *iter;
+			struct rt_pipe_t *pipe = NULL, **ipipe = &pipe;
+
+			for(iter = proc->pipe; iter != NULL; iter = iter->next) {
+				*ipipe = rt_pipe_new(eval_imm(iter->imm, ctx, env));
+				ipipe = &(*ipipe)->next;
+			}
+
+			seq_add(seq, pipe, in, out, proc->append);
 		}
 
 		ctx->gen = ctx->dep = NULL;
@@ -860,8 +879,8 @@ struct val_t *eval_var(const char **str, struct loc_t loc, struct ctx_t *ctx, st
 
 			return val_dup(ctx->dep);
 		}
-		else if(strcmp(id, "~") == 0) 
-			fatal("STUBME"); // return ctx->dir ? val_new(false, strdup(ctx->dir)) : NULL;
+		else if(strcmp(id, "~") == 0)
+			fatal("STUBME");// return ctx->dir ? val_new(false, strdup(ctx->dir)) : NULL;
 
 		bind = env_get(env, id);
 		if(bind == NULL)

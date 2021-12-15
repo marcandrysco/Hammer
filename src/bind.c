@@ -61,6 +61,37 @@ void bind_set(struct bind_t **dst, struct bind_t *src)
 
 
 /**
+ * Reset the binding.
+ *   @bind: The binding.
+ *   @tag: The tag.
+ *   @data: Consumed. The data.
+ *   @loc: The location.
+ */
+void bind_reset(struct bind_t *bind, enum bind_e tag, union bind_u data, struct loc_t loc)
+{
+	switch(bind->tag) {
+	case val_v: val_clear(bind->data.val); break;
+	case func_v: break;
+	case ns_v: cli_err("FIXME stub");
+	}
+
+	bind->tag = tag;
+	bind->data = data;
+}
+
+/**
+ * Reset a binding to a value.
+ *   @bind: The binding.
+ *   @val: The value.
+ *   @loc: The location.
+ */
+void bind_reval(struct bind_t *bind, struct val_t *val, struct loc_t loc)
+{
+	bind_reset(bind, val_v, (union bind_u){ .val = val }, loc);
+}
+
+
+/**
  * Create a value binding.
  *   @id: The identifier.
  *   @val: The value.

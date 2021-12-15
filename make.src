@@ -1,7 +1,7 @@
 all:
 
-hammer.cache: hammer.sh
-	./hammer.sh
+#hammer.cache: hammer.sh
+#	./hammer.sh
 
 .PHONY: all
 all: hammer.cache

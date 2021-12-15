@@ -41,7 +41,7 @@ struct syn_t *syn_new(struct imm_t *gen, struct imm_t *dep, struct loc_t loc)
 	syn->gen = gen;
 	syn->dep = dep;
 	syn->loc = loc;
-	syn->cmd = list_new((del_f)proc_delete);
+	syn->cmd = list_new((del_f)ast_cmd_delete);
 
 	return syn;
 }
@@ -56,40 +56,6 @@ void syn_delete(struct syn_t *syn)
 	imm_delete(syn->dep);
 	list_delete(syn->cmd);
 	free(syn);
-}
-
-
-/**
- * Create a new processing statement.
- *   @imm: The immediate value.
- *   &returns: The processing statement.
- */
-struct proc_t *proc_new(struct imm_t *imm)
-{
-	struct proc_t *proc;
-
-	proc = malloc(sizeof(struct proc_t));
-	proc->imm = imm;
-	proc->in = proc->out = NULL;
-	proc->append = false;
-
-	return proc;
-}
-
-/**
- * Delete a processing statement.
- *   @proc: The processing statement.
- */
-void proc_delete(struct proc_t *proc)
-{
-	if(proc->in != NULL)
-		raw_delete(proc->in);
-
-	if(proc->out != NULL)
-		raw_delete(proc->out);
-
-	imm_delete(proc->imm);
-	free(proc);
 }
 
 
@@ -344,16 +310,18 @@ void print_delete(struct print_t *print)
 /**
  * Create an assignment.
  *   @id: Consumed. The identifier.
- *   @val: Cosnumed. The value.
+ *   @val: Consumed. The value.
+ *   @add: Append flag.
  *   &returns: The assignment.
  */
-struct assign_t *assign_new(struct raw_t *id, struct imm_t *val)
+struct assign_t *assign_new(struct raw_t *id, struct imm_t *val, bool add)
 {
 	struct assign_t *assign;
 
 	assign = malloc(sizeof(struct assign_t));
 	assign->id = id;
 	assign->val = val;
+	assign->add = add;
 
 	return assign;
 }
@@ -400,9 +368,9 @@ void imm_delete(struct imm_t *imm)
  *   @imm: The immate.
  *   &returns: The length.
  */
-u32 imm_len(struct imm_t *imm)
+uint32_t imm_len(struct imm_t *imm)
 {
-	u32 n;
+	uint32_t n;
 	struct raw_t *raw;
 
 	n = 0;
@@ -602,8 +570,9 @@ struct sym_t {
 	const char *str;
 };
 
-#undef TOK_STR
-#undef TOK_EOF
+/**
+ * Compound token IDs.
+ */
 #define TOK_STR   0x1000
 #define TOK_VAR   0x1001
 #define TOK_SPEC  0x1002
@@ -616,19 +585,22 @@ struct sym_t {
 #define TOK_DEF   0x2006
 #define TOK_SHR   0x3000
 #define TOK_SHL   0x3001
+#define TOK_ADDEQ 0x4000
 #define TOK_EOF   0x7FFF
 
 struct sym_t syms[] = {
-	{ TOK_SHR, ">>" },
-	{ TOK_SHL, "<<" },
-	{ '{',     "{" },
-	{ '}',     "}" },
-	{ ':',     ":" },
-	{ ';',     ";" },
-	{ '=',     "=" },
-	{ '<',     "<" },
-	{ '>',     ">" },
-	{ 0,       NULL }
+	{ TOK_SHR,   ">>" },
+	{ TOK_SHL,   "<<" },
+	{ TOK_ADDEQ, "+=" },
+	{ '{',       "{" },
+	{ '}',       "}" },
+	{ ':',       ":" },
+	{ ';',       ";" },
+	{ '=',       "=" },
+	{ '<',       "<" },
+	{ '>',       ">" },
+	{ '|',       "|" },
+	{ 0,         NULL }
 };
 
 struct sym_t keys[] = {
@@ -943,7 +915,9 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 
 		lhs = rd_imm(rd);
 
-		if(rd->tok == '=') {
+		if((rd->tok == '=') || (rd->tok == TOK_ADDEQ)) {
+			bool add = (rd->tok == TOK_ADDEQ);
+
 			if(imm_len(lhs) == 0)
 				loc_err(rd->tloc, "Missing variable name.");
 			else if(imm_len(lhs) >= 2)
@@ -953,7 +927,7 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			rhs = rd_imm(rd);
 
 			tag = assign_v;
-			data.assign = assign_new(raw_dup(lhs->raw), rhs);
+			data.assign = assign_new(raw_dup(lhs->raw), rhs, add);
 
 			if(rd->tok != ';')
 				loc_err(rd->tloc, "Expected ';'.");
@@ -971,9 +945,23 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			if(rd->tok == '{') {
 				rd_tok(rd);
 				while(rd->tok != '}') {
-					struct proc_t *proc;
+					struct ast_cmd_t *proc;
+					struct ast_pipe_t *pipe, **ipipe;
 
-					proc = proc_new(rd_imm(rd));
+					pipe = NULL;
+					ipipe = &pipe;
+
+					*ipipe = ast_pipe_new(rd_imm(rd));
+					ipipe = &(*ipipe)->next;
+
+					while(rd->tok == '|') {
+						rd_tok(rd);
+
+						*ipipe = ast_pipe_new(rd_imm(rd));
+						ipipe = &(*ipipe)->next;
+					}
+
+					proc = ast_cmd_new(pipe);
 					list_add(data.syn->cmd, proc);
 
 					while(rd->tok != ';') {

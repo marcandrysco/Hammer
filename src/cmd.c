@@ -26,7 +26,7 @@ void seq_delete(struct seq_t *seq)
 	cmd = seq->head;
 	while(cmd != NULL) {
 		cmd = (tmp = cmd)->next;
-		val_clear(tmp->val);
+		rt_pipe_clear(tmp->pipe);
 		free(tmp);
 	}
 
@@ -37,18 +37,50 @@ void seq_delete(struct seq_t *seq)
 /**
  * Add a command to a sequence.
  *   @seq: The sequence.
+ *   @pipe: The pipe sequence.
  *   @in: Optional. The input path.
  *   @out: Optional. The output path.
  *   @append: The append flag.
- *   @val: The value list.
  */
-void seq_add(struct seq_t *seq, struct val_t *val, char *in, char *out, bool append)
+void seq_add(struct seq_t *seq, struct rt_pipe_t *pipe, char *in, char *out, bool append)
 {
 	struct cmd_t *cmd;
 
 	cmd = malloc(sizeof(struct cmd_t));
-	*cmd = (struct cmd_t){ val, in, out, append, NULL };
+	*cmd = (struct cmd_t){ pipe, in, out, append, NULL };
 
 	*seq->tail = cmd;
 	seq->tail = &cmd->next;
+}
+
+
+/**
+ * Create a pipe.
+ *   @cmd: Consumed. The pipe.
+ *   &returns: The pipe.
+ */
+struct rt_pipe_t *rt_pipe_new(struct val_t *cmd)
+{
+	struct rt_pipe_t *pipe;
+
+	pipe = malloc(sizeof(struct rt_pipe_t));
+	pipe->cmd = cmd;
+	pipe->next = NULL;
+
+	return pipe;
+}
+
+/**
+ * Clear a list of pipes.
+ *   @pipe: The pipe list.
+ */
+void rt_pipe_clear(struct rt_pipe_t *pipe)
+{
+	struct rt_pipe_t *tmp;
+
+	while(pipe != NULL) {
+		pipe = (tmp = pipe)->next;
+		val_delete(tmp->cmd);
+		free(tmp);
+	}
 }

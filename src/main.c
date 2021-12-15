@@ -11,6 +11,7 @@ int main(int argc, char **argv)
 {
 	cli_app = "hammer";
 
+	os_init();
 	cli_proc(argv + 1);
 	
 	return 0;

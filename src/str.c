@@ -188,7 +188,7 @@ void buf_ch(struct buf_t *buf, char ch)
  *   @mem: The memory.
  *   @len: The length in bytes.
  */
-void buf_mem(struct buf_t *buf, const char *mem, u32 len)
+void buf_mem(struct buf_t *buf, const char *mem, uint32_t len)
 {
 	while(len-- > 0)
 		buf_ch(buf, *mem++);

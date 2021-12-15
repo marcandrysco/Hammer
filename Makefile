@@ -1,51 +1,16 @@
-CC      := gcc
-LD      := gcc
-CFLAGS  := -O1 -g -Wall
-LDFLAGS := 
+all:
 
-# targets and sources
-BIN := hammer
-SRC := src/main.c src/ast.c src/bind.c src/cli.c src/cmd.c src/ctx.c src/func.c src/eval.c src/map.c src/ns.c src/rule.c src/str.c src/target.c src/back/linux.c
+#hammer.cache: hammer.sh
+#	./hammer.sh
 
-# built from sources
-OBJ := $(SRC:.c=.o)
-DEP := $(SRC:.c=.d)
+.PHONY: all
+all: hammer.cache
+	@./hammer.cache .all
 
-# all
-all: hammer.sh $(BIN)
+.PHONY: clean
+clean: hammer.cache
+	@./hammer.cache .clean
 
-$(BIN): $(OBJ)
-	$(LD) $(OBJ) $(LDFLAGS) -o $@
-
-hammer.sh: hammer.c hammer.src make.src
-	rm -f $@
-	cat hammer.src >> $@
-	echo "##csrc##" >> $@
-	cat hammer.c >> $@
-	echo "##make##" >> $@
-	cat make.src >> $@
-	chmod 755 $@
-	
-hammer.c: src/inc.h $(SRC) Makefile
-	cat src/inc.h $(SRC) | sed '/#pragma once/d' | sed '/#include "\(\.\.\/\)*inc.h"/d' > $@
-
-#run: all
-	@#cd test ; ./test.sh
-	#cd uhg ; ./go.sh
-
-# clean everything up
-clean:
-	rm -f $(OBJ) $(DEP) $(BIN)
-
-# template rules
-%.o: %.c Makefile
-	$(CC) -c $< -o $@ $(CFLAGS) -MD -MP -I.
-
-# dependencies
--include $(DEP)
-
-# phony rules
-.PHONY: all clean
-
-# icnlude user rules too
--include make.user
+.PHONY: run
+run: hammer.cache
+	@./hammer.cache .run

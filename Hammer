@@ -1,0 +1,39 @@
+ver = 1.0.0dev0;
+
+src = src/main.c src/ast.c src/bind.c src/cli.c src/cmd.c src/ctx.c src/func.c
+      src/eval.c src/job.c src/map.c src/ns.c src/rule.c src/str.c src/target.c
+      src/ast/cmd.c
+      src/back/linux.c;
+
+
+.all : bld/hammer.o bld/hammer.sh;
+
+
+mini : mini.c {
+	gcc -Wall -O2 mini.c -o mini;
+}
+
+bld/hammer.sh : hammer.src mini src/inc.h $src {
+	rm -f bld/hammer.sh;
+	cat hammer.src >> bld/hammer.sh;
+	echo "##csrc##" >> bld/hammer.sh;
+	sed -s 1d src/inc.h $src | ./mini >> bld/hammer.sh;
+	chmod 755 bld/hammer.sh;
+}
+
+bld/hammer.o : $src {
+	gcc -Wall -Werror $src -o bld/hammer.o;
+}
+
+
+.dist : {
+	rm -rf hammer-$ver-src;
+	mkdir hammer-$ver-src;
+	cp -a --parents $src Hammer hammer.sh hammer.src mini.c hammer-$ver-src;
+	tar -Jcf hammer-$ver-src.tar.xz hammer-$ver-src;
+	rm -r hammer-$ver-src;
+}
+
+.run : .all {
+	./run.sh;
+}
