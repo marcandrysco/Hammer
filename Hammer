@@ -1,8 +1,9 @@
-ver = 1.0.0dev0;
+ver = 1.0.0dev1;
 
 src = src/main.c src/ast.c src/bind.c src/cli.c src/cmd.c src/ctx.c src/func.c
       src/eval.c src/job.c src/map.c src/ns.c src/rule.c src/str.c src/target.c
-      src/ast/cmd.c
+      src/ast/bind.c src/ast/block.c src/ast/cmd.c src/ast/rule.c src/ast/stmt.c
+      src/rt/ref.c
       src/back/linux.c;
 
 
@@ -21,7 +22,7 @@ bld/hammer.sh : hammer.src mini src/inc.h $src {
 	chmod 755 bld/hammer.sh;
 }
 
-bld/hammer.o : $src {
+bld/hammer.o : src/inc.h $src {
 	gcc -Wall -Werror $src -o bld/hammer.o;
 }
 

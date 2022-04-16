@@ -2,7 +2,7 @@
 
 ## 
 # Hammer build system
-#   version 1.0dev0
+#   version 1.0.0dev1
 ##
 
 TMP=".hammer.c"

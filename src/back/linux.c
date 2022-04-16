@@ -1,5 +1,4 @@
 #include "../inc.h"
-
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -8,7 +7,7 @@
 /*
  * global declarations
  */
-i64 os_memcnt = 0;
+int64_t os_memcnt = 0;
 
 
 /**
@@ -42,15 +41,26 @@ void printv(const char *fmt, va_list args)
  *   @...: The printf-style arguments.
  *   &noreturn
  */
-void fatal(const char *fmt, ...)
+void _fatal(const char *file, unsigned long line, const char *fmt, ...)
 {
 	va_list args;
 
 	va_start(args, fmt);
+	//fprintf(stderr, "%s:%lu: ", file, line);
 	vfprintf(stderr, fmt, args);
 	fprintf(stderr, "\n");
 
 	abort(); //FIXME change to exit before release
+}
+
+/**
+ * Unreachable code, fatally terminate.
+ *   &noreturn
+ */
+void unreachable(void)
+{
+	fprintf(stderr, "fatal error: unreachable code\n");
+	abort();
 }
 
 #include <fcntl.h>
@@ -160,6 +170,9 @@ int os_wait(void)
 
 	for(;;) {
 		pid = wait(&stat);
+		if(WIFSIGNALED(stat))
+			fatal("Command failed with signal '%d'.", WTERMSIG(stat));
+
 		if(pid >= 0)
 			break;
 

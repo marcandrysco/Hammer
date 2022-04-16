@@ -1,41 +1,5 @@
 #include "inc.h"
 
-
-/**
- * Create a target.
- *   @spec: The special flag.
- *   @path: Consumed. The file path.
- *   &returns: The target.
- */
-struct target_t *target_new(bool spec, char *path)
-{
-	struct target_t *target;
-
-	target = malloc(sizeof(struct target_t));
-	*target = (struct target_t){ path, spec ? FLAG_SPEC : 0, -1, NULL, NULL };
-
-	return target;
-}
-
-/**
- * Delete a target.
- *   @target: The target.
- */
-void target_delete(struct target_t *target)
-{
-	struct edge_t *edge, *tmp;
-
-	edge = target->edge;
-	while(edge != NULL) {
-		edge = (tmp = edge)->next;
-		free(tmp);
-	}
-
-	free(target->path);
-	free(target);
-}
-
-
 /**
  * Retrieve the target modification time, caching it as needed.
  *   @target: The target.
@@ -167,13 +131,15 @@ bool target_list_contains(struct target_list_t *list, struct target_t *target)
  */
 void target_list_add(struct target_list_t *list, struct target_t *target)
 {
-	struct target_inst_t *inst;
+	struct target_inst_t **inst;
 
-	inst = malloc(sizeof(struct target_inst_t));
-	inst->target = target;
+	inst = &list->inst;
+	while(*inst != NULL)
+		inst = &(*inst)->next;
 
-	inst->next = list->inst;
-	list->inst = inst;
+	*inst = malloc(sizeof(struct target_inst_t));
+	(*inst)->target = target;
+	(*inst)->next = NULL;
 }
 
 struct target_t *target_list_find(struct target_list_t *list, bool spec, const char *path)
@@ -214,7 +180,7 @@ void map_delete(struct map_t *map)
 	ent = map->ent;
 	while(ent != NULL) {
 		ent = (tmp = ent)->next;
-		target_delete(tmp->target);
+		rt_ref_delete(tmp->target);
 		free(tmp);
 	}
 

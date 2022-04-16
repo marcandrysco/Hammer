@@ -32,9 +32,9 @@ void arr_add(const char ***arr, uint32_t *cnt, const char *str)
  */
 void cli_proc(char **args)
 {
-	struct block_t *top;
+	struct ast_block_t *top;
 	struct opt_t opt;
-	struct ctx_t *ctx;
+	struct rt_ctx_t *ctx;
 	const char **arr;
 	uint32_t i, k, cnt;
 
@@ -113,12 +113,15 @@ void cli_proc(char **args)
 	arr_add(&arr, &cnt, NULL);
 
 	top = ham_load("Hammer");
+	if(top == NULL)
+		cli_err("Cannot open '%s'.", "Hammer");
+
 	ctx = ctx_new(&opt);
 
 	eval_top(top, ctx);
 	ctx_run(ctx, arr);
 
-	block_delete(top);
+	ast_block_delete(top);
 	ctx_delete(ctx);
 	arr_delete(arr, cnt);
 }

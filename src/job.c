@@ -43,7 +43,7 @@ void ctrl_add(struct ctrl_t *ctrl, struct rule_t *rule)
 {
 	uint32_t i;
 
-	if(rule->seq->head == NULL)
+	if((rule->seq == NULL) || (rule->seq->head == NULL))
 		return ctrl_done(ctrl, rule);
 
 	for(i = 0; i < ctrl->cnt; i++) {

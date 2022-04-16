@@ -4,17 +4,16 @@
 /**
  * Create a new binding.
  *   @id: Consumed. The identifier.
- *   @tag: The tag.
- *   @data: Consumed. The data.
+ *   @obj: Consumed. The object.
  *   @loc: The location.
  *   &returns: The binding.
  */
-struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data, struct loc_t loc)
+struct bind_t *bind_new(char *id, struct rt_obj_t obj, struct loc_t loc)
 {
 	struct bind_t *bind;
 
 	bind = malloc(sizeof(struct bind_t));
-	*bind = (struct bind_t){ id, tag, data, loc, NULL };
+	*bind = (struct bind_t){ id, obj, loc, NULL };
 
 	return bind;
 }
@@ -25,12 +24,7 @@ struct bind_t *bind_new(char *id, enum bind_e tag, union bind_u data, struct loc
  */
 void bind_delete(struct bind_t *bind)
 {
-	switch(bind->tag) {
-	case val_v: val_clear(bind->data.val); break;
-	case func_v: break;
-	case ns_v: cli_err("FIXME stub");
-	}
-
+	rt_obj_delete(bind->obj);
 	free(bind->id);
 	free(bind);
 }
@@ -59,59 +53,144 @@ void bind_set(struct bind_t **dst, struct bind_t *src)
 	*dst = src;
 }
 
-
 /**
  * Reset the binding.
  *   @bind: The binding.
- *   @tag: The tag.
- *   @data: Consumed. The data.
+ *   @obj: Consumed. The object.
  *   @loc: The location.
  */
-void bind_reset(struct bind_t *bind, enum bind_e tag, union bind_u data, struct loc_t loc)
+void bind_reset(struct bind_t *bind, struct rt_obj_t obj, struct loc_t loc)
 {
-	switch(bind->tag) {
-	case val_v: val_clear(bind->data.val); break;
-	case func_v: break;
-	case ns_v: cli_err("FIXME stub");
+	rt_obj_delete(bind->obj);
+	bind->obj = obj;
+}
+
+
+/**
+ * Create an object.
+ *   @tag: The tag.
+ *   @data: The data.
+ *   &returns: The object.
+ */
+struct rt_obj_t rt_obj_new(enum rt_obj_e tag, union rt_obj_u data)
+{
+	return (struct rt_obj_t){ tag, data };
+}
+
+/**
+ * Duplicate an object.
+ *   @obj: The object.
+ *   &returns: The duplicate.
+ */
+struct rt_obj_t rt_obj_dup(struct rt_obj_t obj)
+{
+	switch(obj.tag) {
+	case rt_null_v: return rt_obj_null(); break;
+	case rt_val_v: return rt_obj_val(val_dup(obj.data.val)); break;
+	case rt_env_v: return rt_obj_env(rt_env_dup(obj.data.env)); break;
+	case rt_func_v: return rt_obj_func(obj.data.func); break;
 	}
 
-	bind->tag = tag;
-	bind->data = data;
+	unreachable();
 }
 
 /**
- * Reset a binding to a value.
- *   @bind: The binding.
- *   @val: The value.
- *   @loc: The location.
+ * Delete an object.
+ *   @obj: The object.
  */
-void bind_reval(struct bind_t *bind, struct val_t *val, struct loc_t loc)
+void rt_obj_delete(struct rt_obj_t obj)
 {
-	bind_reset(bind, val_v, (union bind_u){ .val = val }, loc);
+	switch(obj.tag) {
+	case rt_null_v: break;
+	case rt_val_v: val_clear(obj.data.val); break;
+	case rt_env_v: rt_env_clear(obj.data.env); break;
+	case rt_func_v: break;
+	}
+}
+
+/**
+ * Set an object.
+ *   @dst: The destination reference.
+ *   @src: The source.
+ */
+void rt_obj_set(struct rt_obj_t *dst, struct rt_obj_t src)
+{
+	rt_obj_delete(*dst);
+	*dst = src;
 }
 
 
 /**
- * Create a value binding.
- *   @id: The identifier.
- *   @val: The value.
- *   @loc: The location.
- *   &returns: The binding.
+ * Create a null object.
+ *   &returns: The object.
  */
-struct bind_t *bind_val(char *id, struct val_t *val)
+struct rt_obj_t rt_obj_null(void)
 {
-	return bind_new(id, val_v, (union bind_u){ .val = val }, (struct loc_t){ });
+	return rt_obj_new(rt_null_v, (union rt_obj_u){ });
 }
 
 /**
- * Create a function binding.
- *   @id: The identifier.
- *   @rule: The rule.
- *   &returns: The binding.
+ * Create a value object.
+ *   @val: Consumed. The value.
+ *   &returns: The object.
  */
-struct bind_t *bind_func(char *id, func_t *func)
+struct rt_obj_t rt_obj_val(struct val_t *val)
 {
-	return bind_new(id, func_v, (union bind_u){ .func = func }, (struct loc_t){ });
+	return rt_obj_new(rt_val_v, (union rt_obj_u){ .val = val });
+}
+
+/**
+ * Create an environment object.
+ *   @env: Consumed. The environment.
+ *   &returns: The object.
+ */
+struct rt_obj_t rt_obj_env(struct env_t *env)
+{
+	return rt_obj_new(rt_env_v, (union rt_obj_u){ .env = env });
+}
+
+/**
+ * Create a function object.
+ *   @func: Consumed. The function.
+ *   &returns: The object.
+ */
+struct rt_obj_t rt_obj_func(func_t *func)
+{
+	return rt_obj_new(rt_func_v, (union rt_obj_u){ .func = func });
+}
+
+
+/**
+ * Add two objects.
+ *   @dst: The destination object.
+ *   @src: Consumed. The source object.
+ */
+void rt_obj_add(struct rt_obj_t dst, struct rt_obj_t src, struct loc_t loc)
+{
+	switch(dst.tag) {
+	case rt_null_v:
+		fatal("FIXME stub rt_obj_add null");
+		break;
+
+	case rt_val_v:
+		if(src.tag != dst.tag)
+			loc_err(loc, "Cannot add non-string value to a string value.");
+
+		*val_tail(&dst.data.val) = src.data.val;
+		break;
+
+	case rt_env_v:
+		if(src.tag != dst.tag)
+			loc_err(loc, "Cannot add non-environment value to an environment value.");
+
+		*rt_env_tail(&dst.data.env) = src.data.env;
+		break;
+
+	case rt_func_v:
+		loc_err(loc, "Cannot add function to variable.");
+		break;
+
+	}
 }
 
 
@@ -233,4 +312,138 @@ uint32_t val_len(struct val_t *val)
 	}
 
 	return n;
+}
+
+/**
+ * Retrieve the tail of a value.
+ *   @val: The value reference.
+ *   &return: The tail reference.
+ */
+struct val_t **val_tail(struct val_t **val)
+{
+	while(*val != NULL)
+		val = &(*val)->next;
+
+	return val;
+}
+
+
+/**
+ * Create an environment.
+ *   @up: The parent environment
+ */
+struct env_t *rt_env_new(struct env_t *up)
+{
+	struct env_t *env;
+
+	env = malloc(sizeof(struct env_t));
+	env->nrefs = 1;
+	env->map = map0_new((cmp_f)strcmp, (del_f)bind_delete);
+	env->next = up;
+
+	return env;
+}
+
+/**
+ * Duplicate an environment.
+ *   @env: The environemnt.
+ *   &returns: The duplicate.
+ */
+struct env_t *rt_env_dup(struct env_t *env)
+{
+	struct env_t *iter;
+
+	for(iter = env; iter != NULL; iter = iter->next)
+		iter->nrefs++;
+
+	return env;
+}
+
+/**
+ * Delete an environment.
+ *   @env: The environment.
+ */
+void rt_env_delete(struct env_t *env)
+{
+	if(env->nrefs-- >= 2)
+		return;
+
+	map0_delete(env->map);
+	free(env);
+}
+
+/**
+ * Clear a list of environments.
+ *   @env: The environments.
+ */
+void rt_env_clear(struct env_t *env)
+{
+	struct env_t *tmp;
+
+	while(env != NULL) {
+		env = (tmp = env)->next;
+		rt_env_delete(tmp);
+	}
+}
+
+
+/**
+ * Lookup a binding from the current environment (not recursively).
+ *   @env: The environment.
+ *   @id: The identifier.
+ *   &returns: The binding if found.
+ */
+struct bind_t *rt_env_lookup(struct env_t *env, const char *id)
+{
+	return map0_get(env->map, id);
+}
+
+/**
+ * Get a binding from an environment.
+ *   @env: The environment.
+ *   @id: The identifier.
+ *   &returns: The binding if found.
+ */
+struct bind_t *env_get(struct env_t *env, const char *id)
+{
+	struct bind_t *bind;
+
+	while(env != NULL) {
+		bind = map0_get(env->map, id);
+		if(bind != NULL)
+			return bind;
+
+		env = env->next;
+	}
+
+	return NULL;
+}
+
+/**
+ * Add a binding to an environment.
+ *   @env: The environment.
+ *   @bind: The binding.
+ */
+void env_put(struct env_t *env, struct bind_t *bind)
+{
+	struct bind_t *cur;
+
+	cur = map_rem(env->map, bind->id);
+	if(cur != NULL)
+		bind_delete(cur);
+
+	map0_add(env->map, bind->id, bind);
+}
+
+/**
+ * Retrieve the tail of an environment.
+ *   @env: The environment reference.
+ *   &returns: The tail reference.
+ */
+struct env_t **rt_env_tail(struct env_t **env)
+{
+	while(*env != NULL)
+		env = &(*env)->next;
+
+	return env;
 }

@@ -27,6 +27,13 @@ void seq_delete(struct seq_t *seq)
 	while(cmd != NULL) {
 		cmd = (tmp = cmd)->next;
 		rt_pipe_clear(tmp->pipe);
+
+		if(tmp->in != NULL)
+			free(tmp->in);
+
+		if(tmp->out != NULL)
+			free(tmp->out);
+
 		free(tmp);
 	}
 
@@ -80,7 +87,7 @@ void rt_pipe_clear(struct rt_pipe_t *pipe)
 
 	while(pipe != NULL) {
 		pipe = (tmp = pipe)->next;
-		val_delete(tmp->cmd);
+		val_clear(tmp->cmd);
 		free(tmp);
 	}
 }

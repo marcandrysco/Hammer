@@ -25,9 +25,11 @@ struct rule_t *rule_new(char *id, struct target_list_t *gens, struct target_list
  */
 void rule_delete(struct rule_t *rule)
 {
+	if(rule->seq != NULL)
+		seq_delete(rule->seq);
+
 	target_list_delete(rule->gens);
 	target_list_delete(rule->deps);
-	seq_delete(rule->seq);
 	free(rule);
 }
 

@@ -6,19 +6,19 @@
  *   @block: The block.
  *   @ctx: The context.
  */
-void eval_top(struct block_t *block, struct ctx_t *ctx)
+void eval_top(struct ast_block_t *block, struct rt_ctx_t *ctx)
 {
-	struct env_t env;
-	struct stmt_t *stmt;
+	struct env_t *env;
+	struct ast_stmt_t *stmt;
 
-	env = env_new(NULL);
-	env_put(&env, bind_func(strdup(".sub"), fn_sub));
-	env_put(&env, bind_func(strdup(".pat"), fn_pat));
+	env = rt_env_new(NULL);
+	env_put(env, bind_new(strdup(".sub"), rt_obj_func(fn_sub), (struct loc_t){ }));
+	env_put(env, bind_new(strdup(".pat"), rt_obj_func(fn_pat), (struct loc_t){ }));
 
 	for(stmt = block->stmt; stmt != NULL; stmt = stmt->next)
-		eval_stmt(stmt, ctx, &env);
+		eval_stmt(stmt, ctx, env);
 
-	env_delete(env);
+	rt_env_delete(env);
 }
 
 /**
@@ -26,9 +26,9 @@ void eval_top(struct block_t *block, struct ctx_t *ctx)
  *   @block: The block.
  *   @ctx: The context.
  */
-void eval_block(struct block_t *block, struct ctx_t *ctx, struct env_t *env)
+void eval_block(struct ast_block_t *block, struct rt_ctx_t *ctx, struct env_t *env)
 {
-	struct stmt_t *stmt;
+	struct ast_stmt_t *stmt;
 
 	for(stmt = block->stmt; stmt != NULL; stmt = stmt->next)
 		eval_stmt(stmt, ctx, env);
@@ -40,118 +40,136 @@ void eval_block(struct block_t *block, struct ctx_t *ctx, struct env_t *env)
  *   @ctx: The context.
  *   @env: The environment.
  */
-void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
+void eval_stmt(struct ast_stmt_t *stmt, struct rt_ctx_t *ctx, struct env_t *env)
 {
 	switch(stmt->tag) {
-	case assign_v: {
+	case ast_bind_v: {
 		char *id;
-		struct val_t *val;
-		struct bind_t *bind;
-		struct assign_t *assign = stmt->data.assign;
+		struct bind_t *get = NULL;
+		struct rt_obj_t obj;
+		struct ast_bind_t *bind = stmt->data.bind;
 
-		id = val_id(eval_raw(assign->id, ctx, env), stmt->loc);
-		val = eval_imm(assign->val, ctx, env);
+		id = rt_eval_str(bind->id, ctx, env, stmt->loc);
 
-		bind = env_get(env, id);
-		if(bind != NULL) {
-			if(assign->add) {
+		switch(bind->tag) {
+		case ast_val_v:
+			obj = eval_imm(bind->data.val, ctx, env, stmt->loc);
+			break;
 
-				free(id);
-			}
+		case ast_func_v:
+			fatal("FIXME stub");
+			break;
+
+		case ast_block_v: {
+			struct env_t *nest;
+
+			nest = rt_env_new(env);
+			eval_block(bind->data.block, ctx, nest);
+			nest->next = NULL;
+			obj = rt_obj_env(nest);
+		} break;
+		}
+
+		get = rt_env_lookup(env, id);
+		if(get != NULL) {
+			if(bind->add)
+				rt_obj_add(get->obj, obj, stmt->loc);
 			else
-				bind_reval(bind, val);
+				rt_obj_set(&get->obj, obj);
+
+			free(id);
 		}
 		else
-			env_put(env, bind_val(id, val));
+			env_put(env, bind_new(id, obj, stmt->loc));
 	} break;
 
 	case syn_v: {
-		struct seq_t *seq;
-		struct syn_t *syn = stmt->data.syn;
+		struct ast_rule_t *syn = stmt->data.syn;
 		struct target_list_t *gens, *deps;
 		struct val_t *gen, *dep, *iter;
 		struct link_t *link;
 		struct ast_cmd_t *proc;
+		struct rule_t *rule;
 
-		seq = seq_new();
 		gens = target_list_new();
 		deps = target_list_new();
 
-		gen = eval_imm(syn->gen, ctx, env);
+		gen = rt_eval_val(syn->gen, ctx, env, stmt->loc);
 		for(iter = gen; iter != NULL; iter = iter->next)
 			target_list_add(gens, ctx_target(ctx, iter->spec, iter->str));
 
-		dep = eval_imm(syn->dep, ctx, env);
+		dep = rt_eval_val(syn->dep, ctx, env, stmt->loc);
 		for(iter = dep; iter != NULL; iter = iter->next)
 			target_list_add(deps, ctx_target(ctx, iter->spec, iter->str));
 
-		ctx->gen = gen;
-		ctx->dep = dep;
-		for(link = syn->cmd->head; link != NULL; link = link->next) {
-			char *out, *in;
-
-			proc = link->val;
-			in = proc->in ? val_str(eval_raw(proc->in, ctx, env), syn->loc) : NULL;
-			out = proc->out ? val_str(eval_raw(proc->out, ctx, env), syn->loc) : NULL;
-
-			struct ast_pipe_t *iter;
-			struct rt_pipe_t *pipe = NULL, **ipipe = &pipe;
-
-			for(iter = proc->pipe; iter != NULL; iter = iter->next) {
-				*ipipe = rt_pipe_new(eval_imm(iter->imm, ctx, env));
-				ipipe = &(*ipipe)->next;
-			}
-
-			seq_add(seq, pipe, in, out, proc->append);
-		}
-
-		ctx->gen = ctx->dep = NULL;
+		rule = ctx_rule(ctx, NULL, gens, deps);
 		val_clear(gen);
 		val_clear(dep);
-		ctx_rule(ctx, NULL, gens, deps, seq);
-	} break;
 
-	case dir_v: {
-		char *str;
-		bool cont;
-		struct dir_t *dir = stmt->data.dir;
+		if(syn->cmd != NULL) {
+			rule->seq = seq_new();
+			ctx->cur = rule;
 
-		str = val_str(eval_raw(dir->raw, ctx, env), dir->raw->loc);
-		if(ctx->dir == NULL) {
-			cont = dir->def;
-			if(cont)
-				bind_set(&ctx->dir, bind_val(strdup("~"), val_new(false, strdup(str))));
+			for(link = syn->cmd->head; link != NULL; link = link->next) {
+				char *out, *in;
+				struct ast_pipe_t *iter;
+				struct rt_pipe_t *pipe = NULL, **ipipe = &pipe;
+
+				proc = link->val;
+				in = proc->in ? rt_eval_str(proc->in, ctx, env, syn->loc) : NULL;
+				out = proc->out ? rt_eval_str(proc->out, ctx, env, syn->loc) : NULL;
+
+				for(iter = proc->pipe; iter != NULL; iter = iter->next) {
+					*ipipe = rt_pipe_new(rt_eval_val(iter->imm, ctx, env, stmt->loc));
+					ipipe = &(*ipipe)->next;
+				}
+
+				seq_add(rule->seq, pipe, in, out, proc->append);
+			}
 		}
-		else
-			cont = (strcmp(str, ctx->dir->data.val->str) == 0);
-
-		free(str);
-
-		if(cont && (dir->block != NULL))
-			eval_block(dir->block, ctx, env);
 	} break;
 
 	case loop_v: {
-		struct env_t nest;
-		struct val_t *val, *iter;
+		struct env_t *nest;
+		struct rt_obj_t obj;
 		struct loop_t *loop = stmt->data.loop;
 
-		val = eval_imm(loop->imm, ctx, env);
+		obj = eval_imm(loop->imm, ctx, env, stmt->loc);
 
-		for(iter = val; iter != NULL; iter = iter->next) {
-			nest = env_new(env);
-			env_put(&nest, bind_val(strdup(loop->id), val_new(iter->spec, strdup(iter->str))));
-			eval_stmt(loop->body, ctx, &nest);
-			env_delete(nest);
+		switch(obj.tag) {
+		case rt_val_v: {
+			struct val_t *iter;
+
+			for(iter = obj.data.val; iter != NULL; iter = iter->next) {
+				nest = rt_env_new(env);
+				env_put(nest, bind_new(strdup(loop->id), rt_obj_val(val_new(iter->spec, strdup(iter->str))), stmt->loc));
+				eval_stmt(loop->body, ctx, nest);
+				rt_env_delete(nest);
+			}
+		} break;
+
+		case rt_env_v: {
+			struct env_t *iter;
+
+			for(iter = obj.data.env; iter != NULL; iter = iter->next) {
+				nest = rt_env_new(env);
+				env_put(nest, bind_new(strdup(loop->id), rt_obj_env(rt_env_dup(iter)), stmt->loc));
+				eval_stmt(loop->body, ctx, nest);
+				rt_env_delete(nest);
+			}
+		} break;
+
+		default:
+			loc_err(stmt->loc, "Can only iterate over strings and environments.");
 		}
 
-		val_clear(val);
+		rt_obj_delete(obj);
 	} break;
 
 	case print_v: {
 		struct val_t *val, *iter;
 
-		val = eval_imm(stmt->data.print->imm, ctx, env);
+		val = rt_eval_val(stmt->data.print->imm, ctx, env, stmt->loc);
 
 		for(iter = val; iter != NULL; iter = iter->next)
 			print("%s%s", iter->str, iter->next ? " " : "");
@@ -159,13 +177,21 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
 		val_clear(val);
 	} break;
 
-	case block_v: {
-		struct env_t nest;
+	case ast_mkdep_v:
+		ast_mkdep_eval(stmt->data.mkdep, ctx, env);
+		break;
 
-		nest = env_new(env);
-		eval_block(stmt->data.block, ctx, &nest);
-		env_delete(nest);
+	case block_v: {
+		struct env_t *nest;
+
+		nest = rt_env_new(env);
+		eval_block(stmt->data.block, ctx, nest);
+		rt_env_delete(nest);
 	} break;
+
+	case ast_inc_v:
+		ast_inc_eval(stmt->data.inc, ctx, env, stmt->loc);
+		break;
 	}
 }
 
@@ -174,19 +200,22 @@ void eval_stmt(struct stmt_t *stmt, struct ctx_t *ctx, struct env_t *env)
  *   @imm: The immediate value.
  *   @ctx: The context.
  *   @env: The environment.
+ *   @loc: The location.
+ *   &returns: The object.
  */
-struct val_t *eval_imm(struct imm_t *imm, struct ctx_t *ctx, struct env_t *env)
+struct rt_obj_t eval_imm(struct imm_t *imm, struct rt_ctx_t *ctx, struct env_t *env, struct loc_t loc)
 {
 	struct raw_t *raw;
-	struct val_t *val = NULL, **iter = &val;
+	struct rt_obj_t obj;
 
-	for(raw = imm->raw; raw != NULL; raw = raw->next) {
-		*iter = eval_raw(raw, ctx, env);
-		while(*iter != NULL)
-			iter = &(*iter)->next;
-	}
+	if(imm->raw == NULL)
+		return rt_obj_null();
 
-	return val;
+	obj = eval_raw(imm->raw, ctx, env);
+	for(raw = imm->raw->next; raw != NULL; raw = raw->next)
+		rt_obj_add(obj, eval_raw(raw, ctx, env), loc);
+
+	return obj;
 }
 
 
@@ -202,7 +231,7 @@ struct exp_t {
 	struct buf_t buf;
 	const char *orig, *str;
 
-	struct ctx_t *ctx;
+	struct rt_ctx_t *ctx;
 	struct env_t *env;
 	struct loc_t loc;
 };
@@ -211,7 +240,7 @@ struct exp_t {
 /*
  * expansion declarations
  */
-struct val_t *exp_get(struct exp_t *exp);
+struct rt_obj_t exp_get(struct exp_t *exp);
 
 char exp_ch(struct exp_t *exp);
 char exp_adv(struct exp_t *exp);
@@ -222,10 +251,11 @@ void exp_str(struct exp_t *exp);
 void exp_escape(struct exp_t *exp);
 void exp_quote1(struct exp_t *exp);
 void exp_quote2(struct exp_t *exp);
-struct val_t *exp_var(struct exp_t *exp);
-struct bind_t *exp_bind(struct exp_t *exp);
-void exp_flat(struct exp_t *expr, struct val_t *val);
+struct rt_obj_t exp_var(struct exp_t *exp);
+struct rt_obj_t exp_bind(struct exp_t *exp);
+void exp_flat(struct exp_t *exp, struct rt_obj_t obj);
 
+struct loc_t exp_loc(struct exp_t *exp);
 __attribute__((noreturn)) void exp_err(struct exp_t *exp, const char *fmt, ...);
 
 
@@ -234,20 +264,20 @@ __attribute__((noreturn)) void exp_err(struct exp_t *exp, const char *fmt, ...);
  *   @exp: The expander.
  *   &returns: The value.
  */
-struct val_t *exp_get(struct exp_t *exp)
+struct rt_obj_t exp_get(struct exp_t *exp)
 {
-	struct val_t *val;
+	struct rt_obj_t obj;
 	struct buf_t tmp;
 
 	tmp = exp->buf;
 	exp->buf = buf_new(32);
 
 	if(*exp->str == '$') {
-		val = exp_var(exp);
+		obj = exp_var(exp);
 		if(*exp->str != '\0') {
-			exp_flat(exp, val);
+			exp_flat(exp, obj);
 			exp_str(exp);
-			val = val_new(false, strdup(buf_done(&exp->buf)));
+			obj = rt_obj_val(val_new(false, strdup(buf_done(&exp->buf))));
 		}
 	}
 	else if(*exp->str == '.') {
@@ -257,20 +287,20 @@ struct val_t *exp_get(struct exp_t *exp)
 
 		if(*exp->str != '\0') {
 			exp_str(exp);
-			val = val_new(false, strdup(buf_done(&exp->buf)));
+			obj = rt_obj_val(val_new(false, strdup(buf_done(&exp->buf))));
 		}
 		else
-			val = val_new(true, strdup(buf_done(&exp->buf)));
+			obj = rt_obj_val(val_new(true, strdup(buf_done(&exp->buf))));
 	}
 	else {
 		exp_str(exp);
-		val = val_new(false, strdup(buf_done(&exp->buf)));
+		obj = rt_obj_val(val_new(false, strdup(buf_done(&exp->buf))));
 	}
 
 	buf_delete(&exp->buf);
 	exp->buf = tmp;
 
-	return val;
+	return obj;
 }
 
 
@@ -369,6 +399,7 @@ void exp_escape(struct exp_t *exp)
 	case 'n': ch = '\n'; break;
 	case '$': ch = '$'; break;
 	case ' ': ch = ' '; break;
+	case ',': ch = ','; break;
 	default: exp_err(exp, "Invalid escape sequence '\\%c'.", exp_ch(exp));
 	}
 
@@ -428,31 +459,20 @@ void exp_quote2(struct exp_t *exp)
 /**
  * Expand a variable.
  *   @exp: The expander.
- *   &returns: The value.
+ *   &returns: The object.
  */
-struct val_t *exp_var(struct exp_t *exp)
+struct rt_obj_t exp_var(struct exp_t *exp)
 {
 	char ch;
-	struct val_t *val;
-	struct bind_t *bind;
+	struct rt_obj_t obj;
 
 	ch = exp_adv(exp);
 	if(ch == '{') {
 		exp_adv(exp);
-		bind = exp_bind(exp);
+		obj = exp_bind(exp);
 
-		if(bind->tag == func_v)
-			exp_err(exp, "Function '%s' used as a value.", bind->id);
-
-		if(bind->tag == ns_v) {
-			fatal("FIXME stub ns");
-		}
-
-		val = val_dup(bind->data.val);
 		while((ch = exp_trim(exp)) != '}') {
-			uint32_t cnt;
 			const char *id;
-			struct val_t **args;
 			struct buf_t buf;
 
 			if(ch != '.')
@@ -464,75 +484,105 @@ struct val_t *exp_var(struct exp_t *exp)
 			exp_adv(exp);
 			ch = exp_trim(exp);
 			if(!ch_var(ch))
-				exp_err(exp, "Expected function name.");
+				exp_err(exp, "Expected function/member name.");
 
 			do
 				buf_ch(&buf, ch);
 			while(ch_var(ch = exp_adv(exp)));
 
 			id = buf_done(&buf);
-			bind = env_get(exp->env, id);
-			if(bind == NULL)
-				exp_err(exp, "Unknown function '%s'.", id);
 
-			args_init(&args, &cnt);
-			args_add(&args, &cnt, val);
+			switch(obj.tag) {
+			case rt_null_v:
+				fatal("FIXME exp_var null call");
 
-			if(exp_trim(exp) != '(')
-				exp_err(exp, "Expected '('.");
+			case rt_val_v: {
+				uint32_t cnt;
+				struct bind_t *bind;
+				struct loc_t loc;
+				struct rt_obj_t *args;
 
-			exp_adv(exp);
-			if(exp_trim(exp) != ')') {
-				for(;;) {
-					args_add(&args, &cnt, exp_get(exp));
-					ch = exp_trim(exp);
-					if(ch == ')')
-						break;
-					else if(ch != ',')
-						exp_err(exp, "Expected ',' or '('.");
+				bind = env_get(exp->env, id);
+				if(bind == NULL)
+					exp_err(exp, "Unknown function '%s'.", id);
+				else if(bind->obj.tag != rt_func_v)
+					exp_err(exp, "Variable '%s' is not a function.", id);
 
-					exp_adv(exp);
-					exp_trim(exp);
+				loc = exp_loc(exp);
+				args_init(&args, &cnt);
+				args_add(&args, &cnt, obj);
+
+				if(exp_trim(exp) != '(')
+					exp_err(exp, "Expected '('.");
+
+				exp_adv(exp);
+				if(exp_trim(exp) != ')') {
+					for(;;) {
+						args_add(&args, &cnt, exp_get(exp));
+						ch = exp_trim(exp);
+						if(ch == ')')
+							break;
+						else if(ch != ',')
+							exp_err(exp, "Expected ',' or '('.");
+
+						exp_adv(exp);
+						exp_trim(exp);
+					}
 				}
+
+				exp_adv(exp);
+
+				switch(bind->obj.tag) {
+				case rt_func_v:
+					obj = bind->obj.data.func(args, cnt, loc);
+					break;
+
+				default:
+					unreachable();
+				}
+
+				args_delete(args, cnt);
+			} break;
+
+			case rt_env_v: {
+				struct bind_t *bind;
+
+				bind = env_get(obj.data.env, id + 1);
+				if(bind == NULL)
+					exp_err(exp, "Unknown member '%s'.", id + 1);
+
+				rt_obj_delete(obj);
+				obj = rt_obj_dup(bind->obj);
+			} break;
+
+			case rt_func_v:
+				fatal("FIXME exp_var func call");
 			}
 
-			exp_adv(exp);
-
-			if(bind->tag == val_v)
-				exp_err(exp, "Variable '%s' used as a function.", id);
-			else if(bind->tag == ns_v)
-				exp_err(exp, "Namespace '%s' used as a function.", id);
-
-			val = bind->data.func(args, cnt, exp->loc);
-
-			args_delete(args, cnt);
 			buf_delete(&buf);
 		}
 
 		exp_adv(exp);
-	}
-	else {
-		bind = exp_bind(exp);
 
-		switch(bind->tag) {
-		case val_v: val = val_dup(bind->data.val); break;
-		case func_v: exp_err(exp, "Cannot use function as a value.");
-		case ns_v: exp_err(exp, "Cannot use namspace as a value.");
-		default: fatal("Unreachable.");
-		}
+		return obj;
 	}
-
-	return val;
+	else
+		return exp_bind(exp);
 }
 
 /**
- * Flatten a value.
+ * Flatten an object.
  *   @exp: The expander.
  *   @val: The value.
  */
-void exp_flat(struct exp_t *exp, struct val_t *val)
+void exp_flat(struct exp_t *exp, struct rt_obj_t obj)
 {
-	struct val_t *orig = val;
+	struct val_t *val, *orig;
+
+	if(obj.tag != rt_val_v)
+		exp_err(exp, "Cannot convert non-value to a string.");
+
+	val = orig = obj.data.val;
 
 	while(val != NULL) {
 		buf_str(&exp->buf, val->str);
@@ -549,21 +599,82 @@ void exp_flat(struct exp_t *exp, struct val_t *val)
 /**
  * Retrieve a variable binding.
  *   @exp: The expander.
- *   &returns: The value.
+ *   &returns: The object.
  */
-struct bind_t *exp_bind(struct exp_t *exp)
+struct rt_obj_t exp_bind(struct exp_t *exp)
 {
 	char *id;
 	const char *str;
 	struct buf_t buf;
 	struct bind_t *bind;
 
-	if(*exp->str == '~') {
-		exp_adv(exp);
-		return exp->ctx->dir;
-	}
-
 	str = exp->str;
+
+	if(*str == '@') {
+		struct target_inst_t *inst;
+		struct val_t *val = NULL, **iter = &val;
+
+		if(exp->ctx->cur == NULL)
+			exp_err(exp, "Variable '$@' can only be used in recipes.");
+
+		for(inst = exp->ctx->cur->gens->inst; inst != NULL; inst = inst->next) {
+			*iter = val_new(false, strdup(inst->target->path));
+			iter = &(*iter)->next;
+		}
+
+		exp_adv(exp);
+		return rt_obj_val(val);
+	}
+	else if(*str == '^') {
+		struct target_inst_t *inst;
+		struct val_t *val = NULL, **iter = &val;
+
+		if(exp->ctx->cur == NULL)
+			exp_err(exp, "Variable '$^' can only be used in recipes.");
+
+		for(inst = exp->ctx->cur->deps->inst; inst != NULL; inst = inst->next) {
+			*iter = val_new(false, strdup(inst->target->path));
+			iter = &(*iter)->next;
+		}
+
+		exp_adv(exp);
+		return rt_obj_val(val);
+	}
+	else if(*str == '<') {
+		struct target_inst_t *inst;
+
+		if(exp->ctx->cur == NULL)
+			exp_err(exp, "Variable '$<' can only be used in recipes.");
+
+		inst = exp->ctx->cur->deps->inst;
+		if(inst == NULL)
+			return rt_obj_null();
+
+		exp_adv(exp);
+		return rt_obj_val(val_new(inst->target->flags & FLAG_SPEC, strdup(inst->target->path)));
+	}
+	else if(*str == '*') {
+		struct val_t *val, **iter;
+		struct rule_inst_t *inst;
+
+		val = NULL;
+		iter = &val;
+		for(inst = exp->ctx->rules->inst; inst != NULL; inst = inst->next) {
+			struct target_inst_t *ref;
+
+			for(ref = inst->rule->gens->inst; ref != NULL; ref = ref->next) {
+				if(ref->target->flags & FLAG_SPEC)
+					continue;
+
+				*iter = val_new(false, strdup(ref->target->path));
+				iter = &(*iter)->next;
+			}
+		}
+
+		*iter = NULL;
+		exp_adv(exp);
+		return rt_obj_val(val);
+	}
 
 	buf = buf_new(32);
 
@@ -579,9 +690,19 @@ struct bind_t *exp_bind(struct exp_t *exp)
 	exp->str = str;
 	free(id);
 
-	return bind;
+	return rt_obj_dup(bind->obj);
 }
 
+
+/**
+ * Retrieve a location for thes string expansion.
+ *   @exp: The string expansion.
+ *   &returns: The location.
+ */
+struct loc_t exp_loc(struct exp_t *exp)
+{
+	return loc_off(exp->loc, exp->str - exp->orig);
+}
 
 /**
  * Display an error for string expansion.
@@ -608,8 +729,9 @@ void exp_err(struct exp_t *exp, const char *fmt, ...)
  *   @raw: The raw.
  *   @ctx: The context.
  *   @env: The environment.
+ *   &returns: The object.
  */
-struct val_t *eval_raw(struct raw_t *raw, struct ctx_t *ctx, struct env_t *env)
+struct rt_obj_t eval_raw(struct raw_t *raw, struct rt_ctx_t *ctx, struct env_t *env)
 {
 	struct exp_t exp;
 
@@ -623,11 +745,61 @@ struct val_t *eval_raw(struct raw_t *raw, struct ctx_t *ctx, struct env_t *env)
 
 
 /**
+ * Evaluate an immediate to a value.
+ *   @imm: The immediate.
+ *   @ctx: The context.
+ *   @env: The environment.
+ *   @loc: The location for error information.
+ *   &returns: The value.
+ */
+struct val_t *rt_eval_val(struct imm_t *imm, struct rt_ctx_t *ctx, struct env_t *env, struct loc_t loc)
+{
+	struct rt_obj_t obj;
+
+	obj = eval_imm(imm, ctx, env, loc);
+	if(obj.tag == rt_null_v)
+		return NULL;
+	else if(obj.tag != rt_val_v)
+		loc_err(loc, "String values required.");
+
+	return obj.data.val;
+}
+
+/**
+ * Evaluate an raw to a string.
+ *   @raw: The raw.
+ *   @ctx: The context.
+ *   @env: The environment.
+ *   @loc: The location for error information.
+ *   &returns: The string.
+ */
+char *rt_eval_str(struct raw_t *raw, struct rt_ctx_t *ctx, struct env_t *env, struct loc_t loc)
+{
+	char *str;
+	struct val_t *val;
+	struct rt_obj_t obj;
+
+	obj = eval_raw(raw, ctx, env);
+	if(obj.tag != rt_val_v)
+		loc_err(loc, "String required.");
+
+	val = obj.data.val;
+	if((val == NULL) || (val->next != NULL))
+		loc_err(loc, "String required.");
+
+	str = val->str;
+	free(val);
+
+	return str;
+}
+
+
+/**
  * Initialize arguments.
  *   @args: The arguments reference.
  *   @cnt: The number of arguments reference.
  */
-void args_init(struct val_t ***args, uint32_t *cnt)
+void args_init(struct rt_obj_t **args, uint32_t *cnt)
 {
 	*args = malloc(0);
 	*cnt = 0;
@@ -637,12 +809,12 @@ void args_init(struct val_t ***args, uint32_t *cnt)
  * Add to arguments.
  *   @args: The arguments reference.
  *   @cnt: The number of arguments reference.
- *   @val: Consumed. The value.
+ *   @obj: Consumed. The object.
  */
-void args_add(struct val_t ***args, uint32_t *cnt, struct val_t *val)
+void args_add(struct rt_obj_t **args, uint32_t *cnt, struct rt_obj_t obj)
 {
-	*args = realloc(*args, (*cnt + 1) * sizeof(struct val_t));
-	(*args)[(*cnt)++] = val;
+	*args = realloc(*args, (*cnt + 1) * sizeof(struct rt_obj_t));
+	(*args)[(*cnt)++] = obj;
 }
 
 /**
@@ -650,39 +822,52 @@ void args_add(struct val_t ***args, uint32_t *cnt, struct val_t *val)
  *   @args: The arguments.
  *   @cnt: The number of arguments.
  */
-void args_delete(struct val_t **args, uint32_t cnt)
+void args_delete(struct rt_obj_t *args, uint32_t cnt)
 {
 	uint32_t i;
 
 	for(i = 0; i < cnt; i++)
-		val_delete(args[i]);
+		rt_obj_delete(args[i]);
 
 	free(args);
 }
 
 
-struct val_t *fn_sub(struct val_t **args, uint32_t cnt, struct loc_t loc)
+
+/**
+ * Perform simple text substitution.
+ *   @args: The arguments.
+ *   @cnt: The number of arguments.
+ *   @loc: The call location for error reporting.
+ */
+struct rt_obj_t fn_sub(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 {
 	struct buf_t buf;
 	struct val_t *val, *ret, **iter;
-	const char *str, *find;
+	const char *get, *put, *str, *find;
 
 	if(cnt != 3)
 		loc_err(loc, "Function `.sub` requires 2 arguments.");
+	else if((args[0].tag != rt_val_v) || (args[1].tag != rt_val_v) || (args[2].tag != rt_val_v))
+		loc_err(loc, "Function `.sub` requires string values as arguments.");
+	else if((val_len(args[1].data.val) != 1) || (val_len(args[2].data.val) != 1))
+		loc_err(loc, "Function `.sub` requires string values as arguments.");
 
 	iter = &ret;
+	get = args[1].data.val->str;
+	put = args[2].data.val->str;
 
-	for(val = args[0]; val != NULL; val = val->next) {
+	for(val = args[0].data.val; val != NULL; val = val->next) {
 		str = val->str;
 		buf = buf_new(strlen(val->str) + 1);
 
-		find = strstr(str, args[1]->str);
+		find = strstr(str, get);
 		while(find != NULL) {
 			buf_mem(&buf, str, find - str);
-			buf_str(&buf, args[2]->str);
+			buf_str(&buf, put);
 
-			str = find + strlen(args[1]->str);
-			find = strstr(str, args[1]->str);
+			str = find + strlen(get);
+			find = strstr(str, get);
 		}
 		buf_str(&buf, str);
 
@@ -692,7 +877,7 @@ struct val_t *fn_sub(struct val_t **args, uint32_t cnt, struct loc_t loc)
 
 	*iter = NULL;
 
-	return ret;
+	return rt_obj_val(ret);
 }
 
 /**
@@ -701,7 +886,7 @@ struct val_t *fn_sub(struct val_t **args, uint32_t cnt, struct loc_t loc)
  *   @pre: Out. The pre-pattern length.
  *   @post: Out The post-pattern length.
  */
-bool pat_pre(const char *str, uint32_t *pre, uint32_t *post)
+bool pat_len(const char *str, uint32_t *pre, uint32_t *post)
 {
 	const char *find;
 
@@ -714,241 +899,49 @@ bool pat_pre(const char *str, uint32_t *pre, uint32_t *post)
 	return true;
 }
 
-struct val_t *fn_pat(struct val_t **args, uint32_t cnt, struct loc_t loc)
+
+struct rt_obj_t fn_pat(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 {
-	uint32_t pre, post;
+	uint32_t len, min, spre, spost, slen, rpre, rpost, rlen;
 	struct buf_t buf;
 	struct val_t *val, *ret, **iter;
 	char *pat, *repl;
 
 	if(cnt != 3)
 		loc_err(loc, "Function `.pat` requires 2 arguments.");
+	else if((args[0].tag != rt_val_v) || (args[1].tag != rt_val_v) || (args[2].tag != rt_val_v))
+		loc_err(loc, "Function `.sub` requires string values as arguments.");
+	else if((val_len(args[1].data.val) != 1) || (val_len(args[2].data.val) != 1))
+		loc_err(loc, "Function `.sub` requires string values as arguments.");
+
+	pat = args[1].data.val->str;
+	repl = args[2].data.val->str;
+	slen = strlen(pat);
+	rlen = strlen(repl);
+
+	if(!pat_len(pat, &spre, &spost) || !pat_len(repl, &rpre, &rpost))
+		loc_err(loc, "Function `.pat` requires patterns as arguments (must contain a single '%').");
 
 	iter = &ret;
-	pat = val_str(args[1], loc);
-	repl = val_str(args[2], loc);
+	min = spre + spost;
 
-	if(!pat_pre(pat, &pre, &post))
-		loc_err(loc, "Function `.pat` requires patterns as arguments (must contain a single '%').");
-	//find = strchr(pat, '%');
-	//if(find == NULL)
-		//loc_err(loc, "Function `.pat` requires patterns as arguments (must contain a single '%').");
+	for(val = args[0].data.val; val != NULL; val = val->next) {
+		len = strlen(val->str);
+		if((len > min) && (memcmp(val->str, pat, spre) == 0) && (strcmp(val->str + len - spost, pat + slen - spost) == 0)) {
+			buf = buf_new(32);
+			buf_mem(&buf, repl, rpre);
+			buf_mem(&buf, val->str + spre, len - spost - spre);
+			buf_str(&buf, repl + rlen - rpost);
 
-	for(val = args[0]; val != NULL; val = val->next) {
-		pat_pre(val->str, &pre, &post);
-		//for(i = 0; pat[i] != '%'; i++) {
-			//if(pat[i] == '\0')
-		//}
+			*iter = val_new(val->spec, buf_done(&buf));
+		}
+		else
+			*iter = val_new(val->spec, strdup(val->str));
 
-		buf_new(32);
-		buf_done(&buf);
-		
-		//str = find = NULL;
-		//if(find || str);
+		iter = &(*iter)->next;
 	}
 
-	free(pat);
-	free(repl);
 	*iter = NULL;
 
-	return ret;
-}
-
-struct val_t *eval_str(const char **str, struct loc_t loc, struct ctx_t *ctx, struct env_t *env)
-{
-	switch(**str) {
-	case '$':
-		(*str)++;
-		return eval_var(str, loc_off(loc, 1), ctx, env);
-
-	case '"':
-	case '\'':
-		fatal("FIXME eval_str");
-
-	default: {
-		struct buf_t buf;
-
-		if(!ch_str(**str))
-			loc_err(loc, "Expected string.");
-
-		buf = buf_new(32);
-
-		do
-			buf_ch(&buf, *(*str)++);
-		while(ch_str(**str));
-
-		return val_new(false, buf_done(&buf));
-	} break;
-	}
-}
-
-/**
- * Evaluate a variable.
- *   @str: Ref. The string.
- *   @loc: The location.
- *   @ctx: The context.
- *   @env: The environment.
- *   &returns: The value.
- */
-struct val_t *eval_var(const char **str, struct loc_t loc, struct ctx_t *ctx, struct env_t *env)
-{
-	char id[256];
-	struct bind_t *bind;
-	struct val_t *val, *iter;
-	const char *orig = *str;
-
-	if((*str)[0] == '$')
-		return val_new(false, "$$");
-	else if((*str)[0] == '{') {
-		(*str)++;
-		val = eval_var(str, loc_off(loc, *str - orig), ctx, env);
-		while(**str != '}') {
-			uint32_t off, cnt;
-			struct val_t **args;
-
-			if(**str != '.')
-				loc_err(loc_off(loc, *str - orig), "Expected '.' or '}'.");
-
-			off = *str - orig;
-			(*str)++;
-			id[0] = '.';
-			get_var(str, id + 1, loc);
-
-			bind = env_get(env, id);
-			if(bind == NULL)
-				loc_err(loc_off(loc, off), "Unknown function '%s'.", id);
-
-			args_init(&args, &cnt);
-			args_add(&args, &cnt, val);
-
-			str_trim(str);
-			if(**str != '(')
-				loc_err(loc_off(loc, *str - orig), "Expected '.' or '}'.");
-
-			(*str)++;
-			str_trim(str);
-			if(**str != ')') {
-				for(;;) {
-					args_add(&args, &cnt, eval_str(str, loc_off(loc, *str - orig), ctx, env));
-					str_trim(str);
-					if(**str == ')')
-						break;
-					else if(**str != ',')
-						loc_err(loc_off(loc, *str - orig), "Expected ',' or ')'.");
-
-					(*str)++;
-					str_trim(str);
-				}
-			}
-			(*str)++;
-
-			switch(bind->tag) {
-			case val_v:
-				loc_err(loc_off(loc, off), "Cannot call a value.");
-
-			case func_v:
-				val = bind->data.func(args, cnt, loc_off(loc, off));
-				break;
-
-			case ns_v:
-				loc_err(loc_off(loc, off), "Cannot call a namespace.");
-			}
-
-			args_delete(args, cnt);
-		}
-		(*str)++;
-
-		return val;
-	}
-	else {
-		get_var(str, id, loc_off(loc, *str - orig));
-
-		if(strcmp(id, "@") == 0) {
-			if(ctx->gen == NULL)
-				loc_err(loc_off(loc, *str - orig), "Variable `$@` can only be used within a recipe.");
-
-			val = val_dup(ctx->gen);
-			for(iter = val; iter != NULL; iter = iter->next)
-				str_set(&val->str, str_fmt("$~%s", val->str));
-			
-			return val;
-		}
-		else if(strcmp(id, "^") == 0) {
-			if(ctx->gen == NULL)
-				loc_err(loc_off(loc, *str - orig), "Variable `$^` can only be used within a recipe.");
-
-			return val_dup(ctx->dep);
-		}
-		else if(strcmp(id, "~") == 0)
-			fatal("STUBME");// return ctx->dir ? val_new(false, strdup(ctx->dir)) : NULL;
-
-		bind = env_get(env, id);
-		if(bind == NULL)
-			loc_err(loc, "Unknown variable '%s'.", id);
-
-		switch(bind->tag) {
-		case val_v: val = val_dup(bind->data.val); break;
-		case ns_v: fatal("FIXME stub namespace binding");
-		default: __builtin_unreachable();
-		}
-	}
-
-	return val;
-}
-
-
-/**
- * Create an environment.
- *   @up: The parent environment
- */
-struct env_t env_new(struct env_t *up)
-{
-	return (struct env_t){ map0_new((cmp_f)strcmp, (del_f)bind_delete), up };
-}
-
-/**
- * Delete an environment.
- *   @env: The environment.
- */
-void env_delete(struct env_t env)
-{
-	map0_delete(env.map);
-}
-
-
-/**
- * Get a binding from an environment.
- *   @env: The environment.
- *   @id: The identifier.
- *   &returns: The binding if found.
- */
-struct bind_t *env_get(struct env_t *env, const char *id)
-{
-	struct bind_t *bind;
-
-	while(env != NULL) {
-		bind = map0_get(env->map, id);
-		if(bind != NULL)
-			return bind;
-
-		env = env->up;
-	}
-
-	return NULL;
-}
-
-/**
- * Add a binding to an environment.
- *   @env: The environment.
- *   @bind: The binding.
- */
-void env_put(struct env_t *env, struct bind_t *bind)
-{
-	struct bind_t *cur;
-
-	cur = map_rem(env->map, bind->id);
-	if(cur != NULL)
-		bind_delete(cur);
-
-	map0_add(env->map, bind->id, bind);
+	return rt_obj_val(ret);
 }

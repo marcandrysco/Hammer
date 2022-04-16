@@ -43,6 +43,25 @@ uint64_t hash64(uint64_t hash, const char *str)
 
 
 /**
+ * Swap memory.
+ *   @lhs: The left-hand side.
+ *   @rhs: The right-hand size.
+ *   @len: The length in bytes.
+ */
+void memswap(void *lhs, void *rhs, size_t len)
+{
+	size_t i;
+	uint8_t t, *x = lhs, *y = rhs;
+
+	for(i = 0; i < len; i++) {
+		t = x[i];
+		x[i] = y[i];
+		y[i] = t;
+	}
+}
+
+
+/**
  * Compute an offset from a location.
  *   @loc: The location.
  *   @off: The offset.

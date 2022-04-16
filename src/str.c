@@ -263,7 +263,7 @@ bool ch_var(int ch)
  */
 bool ch_str(int ch)
 {
-	return ch_alnum(ch) || (strchr("~/._-+", ch) != NULL);
+	return ch_alnum(ch) || (strchr("~/._-+=%", ch) != NULL);
 }
 
 /**

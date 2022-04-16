@@ -6,17 +6,16 @@
  *   @opt: The options structure.
  *   &returns: The context.
  */
-struct ctx_t *ctx_new(const struct opt_t *opt)
+struct rt_ctx_t *ctx_new(const struct opt_t *opt)
 {
-	struct ctx_t *ctx;
+	struct rt_ctx_t *ctx;
 
-	ctx = malloc(sizeof(struct ctx_t));
+	ctx = malloc(sizeof(struct rt_ctx_t));
 	ctx->opt = opt;
 	ctx->map = map_new();
 	ctx->rules = rule_list_new();
-	ctx->dir = bind_val(strdup("~"), val_new(false, strdup(opt->dir ? opt->dir : "")));
+	ctx->cur = NULL;
 	ctx->gens = ctx->deps = NULL;
-	ctx->gen = ctx->dep = NULL;
 
 	return ctx;
 }
@@ -25,9 +24,8 @@ struct ctx_t *ctx_new(const struct opt_t *opt)
  * Delete the context.
  *   @ctx: The context.
  */
-void ctx_delete(struct ctx_t *ctx)
+void ctx_delete(struct rt_ctx_t *ctx)
 {
-	bind_delete(ctx->dir);
 	map_delete(ctx->map);
 	rule_list_delete(ctx->rules);
 	free(ctx);
@@ -39,7 +37,7 @@ void ctx_delete(struct ctx_t *ctx)
  *   @ctx: The context.
  *   @builds: The set of target to build.
  */
-void ctx_run(struct ctx_t *ctx, const char **builds)
+void ctx_run(struct rt_ctx_t *ctx, const char **builds)
 {
 	struct ctrl_t *ctrl;
 	struct rule_t *rule;
@@ -145,13 +143,13 @@ void ctx_run(struct ctx_t *ctx, const char **builds)
  *   @path: The path.
  *   &returns: The target.
  */
-struct target_t *ctx_target(struct ctx_t *ctx, bool spec, const char *path)
+struct target_t *ctx_target(struct rt_ctx_t *ctx, bool spec, const char *path)
 {
 	struct target_t *target;
 
 	target = map_get(ctx->map, spec, path);
 	if(target == NULL) {
-		target = target_new(spec, strdup(path));
+		target = rt_ref_new(spec, strdup(path));
 		map_add(ctx->map, target);
 	}
 
@@ -164,34 +162,71 @@ struct target_t *ctx_target(struct ctx_t *ctx, bool spec, const char *path)
  *   @id: Optional. The rule identifier.
  *   @gens: Consumed. The set of generated targets.
  *   @deps: Consumed. The set of dependency targets.
- *   @seq: Consumed. The command sequence.
  */
-struct rule_t *ctx_rule(struct ctx_t *ctx, const char *id, struct target_list_t *gens, struct target_list_t *deps, struct seq_t *seq)
+struct rule_t *ctx_rule(struct rt_ctx_t *ctx, const char *id, struct target_list_t *gens, struct target_list_t *deps)
 {
 	struct rule_t *rule;
+
+	if(gens->inst == NULL)
+		fatal("FIXME location All rules must have at least one targets.");
 
 	if(id != NULL) {
 		fatal("FIXME stub rule w/ id");
 	}
 	else {
 		struct target_t *target;
+		struct target_inst_t **inst;
 		struct target_iter_t iter;
 
-		rule = rule_new(id ? strdup(id) : NULL, gens, deps, seq);
-		rule_list_add(ctx->rules, rule);
-
 		iter = target_iter(gens);
-		while((target = target_next(&iter)) != NULL) {
-			if(target->rule != NULL)
-				fatal("FIXME target already had rule, better error");
+		rule = target_next(&iter)->rule;
+		if(rule != NULL) {
+			uint32_t len;
 
-			target->rule = rule;
+			if(rule->seq != NULL)
+				fatal("Cannot add targets to a rule with a recipe.");
+
+			len = target_list_len(gens);
+			if(target_list_len(rule->gens) != len)
+				fatal("Partial rules must have matching target lists.");
+
+			iter = target_iter(gens);
+			while((target = target_next(&iter)) != NULL) {
+				if(!target_list_contains(rule->gens, target))
+					fatal("Partial rules must have matching target lists.");
+			}
+
+			inst = &rule->deps->inst;
+			while(*inst != NULL)
+				inst = &(*inst)->next;
+
+			*inst = deps->inst;
+			deps->inst = NULL;
+
+			iter = target_iter(deps);
+			while((target = target_next(&iter)) != NULL)
+				target_conn(target, rule);
+
+			target_list_delete(gens);
+			target_list_delete(deps);
 		}
+		else {
+			rule = rule_new(id ? strdup(id) : NULL, gens, deps, NULL);
+			rule_list_add(ctx->rules, rule);
 
-		iter = target_iter(deps);
-		while((target = target_next(&iter)) != NULL)
-			target_conn(target, rule);
+			iter = target_iter(gens);
+			while((target = target_next(&iter)) != NULL) {
+				if(target->rule != NULL)
+					fatal("FIXME target already had rule, better error");
+
+				target->rule = rule;
+			}
+
+			iter = target_iter(deps);
+			while((target = target_next(&iter)) != NULL)
+				target_conn(target, rule);
+		}
 	}
 
-	return NULL;
+	return rule;
 }

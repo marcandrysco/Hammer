@@ -2,106 +2,6 @@
 
 
 /**
- * Create a block.
- *   &returns: The block.
- */
-struct block_t *block_new(void)
-{
-	struct block_t *block;
-
-	block = malloc(sizeof(struct block_t));
-	block->stmt = NULL;
-
-	return block;
-}
-
-/**
- * Delete a block.
- *   @block: The block.
- */
-void block_delete(struct block_t *block)
-{
-	stmt_clear(block->stmt);
-	free(block);
-}
-
-
-/**
- * Create a syntatic rule.
- *   @gen: Consumed. The generator immediate.
- *   @dep: Consumed. The generator immediate.
- *   @loc: The location.
- *   &returns: The syntatic rule.
- */
-struct syn_t *syn_new(struct imm_t *gen, struct imm_t *dep, struct loc_t loc)
-{
-	struct syn_t *syn;
-
-	syn = malloc(sizeof(struct syn_t));
-	syn->gen = gen;
-	syn->dep = dep;
-	syn->loc = loc;
-	syn->cmd = list_new((del_f)ast_cmd_delete);
-
-	return syn;
-}
-
-/**
- * Delete a syntatic rule.
- *   @syn: The syntatic rule.
- */
-void syn_delete(struct syn_t *syn)
-{
-	imm_delete(syn->gen);
-	imm_delete(syn->dep);
-	list_delete(syn->cmd);
-	free(syn);
-}
-
-
-/**
- * Add a command to the syntatic rule.
- *   @syn: The syntax.
- *   @cmd: The command.
- */
-void syn_add(struct syn_t *syn, struct imm_t *cmd)
-{
-	list_add(syn->cmd, cmd);
-}
-
-
-/**
- * Create a directory statement.
- *   @def: The default flag.
- *   @imm: The immediate value.
- *   @block: Optional. The configuration block.
- *   &returns: The directory statement.
- */
-struct dir_t *dir_new(bool def, struct raw_t *raw, struct block_t *block)
-{
-	struct dir_t *dir;
-
-	dir = malloc(sizeof(struct dir_t));
-	*dir = (struct dir_t){ def, raw, block };
-	
-	return dir;
-}
-
-/**
- * Delete a directory statement.
- *   @dir: The directory statement.
- */
-void dir_delete(struct dir_t *dir)
-{
-	if(dir->block != NULL)
-		block_delete(dir->block);
-
-	raw_delete(dir->raw);
-	free(dir);
-}
-
-
-/**
  * Create a loop.
  *   @id: Consumed. The identifier.
  *   @imm: Consumed. The immediate value.
@@ -109,7 +9,7 @@ void dir_delete(struct dir_t *dir)
  *   @loc: The location.
  *   &returns: The loop.
  */
-struct loop_t *loop_new(char *id, struct imm_t *imm, struct stmt_t *body, struct loc_t loc)
+struct loop_t *loop_new(char *id, struct imm_t *imm, struct ast_stmt_t *body, struct loc_t loc)
 {
 	struct loop_t *loop;
 
@@ -229,59 +129,6 @@ void *map_rem(struct map0_t *map, const void *key)
 
 
 /**
- * Create a statement.
- *   @tag: The tag.
- *   @data: Consumed. The data.
- *   @loc: The location.
- *   &returns: The statement.
- */
-struct stmt_t *stmt_new(enum stmt_e tag, union stmt_u data, struct loc_t loc)
-{
-	struct stmt_t *stmt;
-
-	stmt = malloc(sizeof(struct stmt_t));
-	stmt->tag = tag;
-	stmt->data = data;
-	stmt->loc = loc;
-	stmt->next = NULL;
-
-	return stmt;
-}
-
-/**
- * Delete a statement.
- *   @stmt: The statement.
- */
-void stmt_delete(struct stmt_t *stmt)
-{
-	switch(stmt->tag) {
-	case assign_v: assign_delete(stmt->data.assign); break;
-	case syn_v: syn_delete(stmt->data.syn); break;
-	case dir_v: dir_delete(stmt->data.dir); break;
-	case loop_v: loop_delete(stmt->data.loop); break;
-	case print_v: print_delete(stmt->data.print); break;
-	case block_v: block_delete(stmt->data.block); break;
-	}
-
-	free(stmt);
-}
-
-/**
- * Clear a list of statement.
- *   @stmt: The statement list.
- */
-void stmt_clear(struct stmt_t *stmt)
-{
-	struct stmt_t *tmp;
-
-	while(stmt != NULL) {
-		stmt = (tmp = stmt)->next;
-		stmt_delete(tmp);
-	}
-}
-
-
-/**
  * Create a print statement.
  *   @imm: Consumed. The immediate value.
  *   &returns: The print statement.
@@ -304,37 +151,6 @@ void print_delete(struct print_t *print)
 {
 	imm_delete(print->imm);
 	free(print);
-}
-
-
-/**
- * Create an assignment.
- *   @id: Consumed. The identifier.
- *   @val: Consumed. The value.
- *   @add: Append flag.
- *   &returns: The assignment.
- */
-struct assign_t *assign_new(struct raw_t *id, struct imm_t *val, bool add)
-{
-	struct assign_t *assign;
-
-	assign = malloc(sizeof(struct assign_t));
-	assign->id = id;
-	assign->val = val;
-	assign->add = add;
-
-	return assign;
-}
-
-/**
- * Delete an assignment.
- *   @assign: The assignment.
- */
-void assign_delete(struct assign_t *assign)
-{
-	raw_delete(assign->id);
-	imm_delete(assign->val);
-	free(assign);
 }
 
 
@@ -469,8 +285,8 @@ void rd_reset(struct rd_t *rd);
 int rd_push(struct rd_t *rd, char ch);
 int rd_buf(struct rd_t *rd);
 
-struct block_t *rd_top(struct rd_t *rd);
-struct stmt_t *rd_stmt(struct rd_t *rd);
+struct ast_block_t *rd_top(struct rd_t *rd);
+struct ast_stmt_t *rd_stmt(struct rd_t *rd);
 struct imm_t *rd_imm(struct rd_t *rd);
 struct raw_t *rd_raw(struct rd_t *rd);
 
@@ -480,14 +296,14 @@ struct raw_t *rd_raw(struct rd_t *rd);
  *   @path: The path.
  *   &returns: The block.
  */
-struct block_t *ham_load(const char *path)
+struct ast_block_t *ham_load(const char *path)
 {
 	struct rd_t rd;
-	struct block_t *block;
+	struct ast_block_t *block;
 
 	rd.file = fopen(path, "r");
 	if(rd.file == NULL)
-		cli_err("Cannot open '%s'.", path);
+		return NULL;
 
 	rd.loc.path = path;
 	rd.loc.lin = 1;
@@ -573,20 +389,23 @@ struct sym_t {
 /**
  * Compound token IDs.
  */
-#define TOK_STR   0x1000
-#define TOK_VAR   0x1001
-#define TOK_SPEC  0x1002
-#define TOK_DIR   0x2000
-#define TOK_FOR   0x2001
-#define TOK_IF    0x2002
-#define TOK_ELIF  0x2003
-#define TOK_ELSE  0x2004
-#define TOK_PRINT 0x2005
-#define TOK_DEF   0x2006
-#define TOK_SHR   0x3000
-#define TOK_SHL   0x3001
-#define TOK_ADDEQ 0x4000
-#define TOK_EOF   0x7FFF
+#define TOK_STR     0x1000
+#define TOK_VAR     0x1001
+#define TOK_SPEC    0x1002
+#define TOK_DIR     0x2000
+#define TOK_FOR     0x2001
+#define TOK_IF      0x2002
+#define TOK_ELIF    0x2003
+#define TOK_ELSE    0x2004
+#define TOK_PRINT   0x2005
+#define TOK_DEF     0x2006
+#define TOK_MKDEP   0x2007
+#define TOK_INCLUDE 0x2008
+#define TOK_IMPORT  0x2009
+#define TOK_SHR     0x3000
+#define TOK_SHL     0x3001
+#define TOK_ADDEQ   0x4000
+#define TOK_EOF     0x7FFF
 
 struct sym_t syms[] = {
 	{ TOK_SHR,   ">>" },
@@ -600,18 +419,22 @@ struct sym_t syms[] = {
 	{ '<',       "<" },
 	{ '>',       ">" },
 	{ '|',       "|" },
+	{ '?',       "?" },
 	{ 0,         NULL }
 };
 
 struct sym_t keys[] = {
-	{ TOK_DIR,   "dir"     },
-	{ TOK_FOR,   "for"     },
-	{ TOK_IF,    "if"      },
-	{ TOK_ELIF,  "elif"    },
-	{ TOK_ELSE,  "else"    },
-	{ TOK_PRINT, "print"   },
-	{ TOK_DEF  , "default" },
-	{ 0,         NULL      }
+	{ TOK_DIR,     "dir"      },
+	{ TOK_FOR,     "for"      },
+	{ TOK_IF,      "if"       },
+	{ TOK_ELIF,    "elif"     },
+	{ TOK_ELSE,    "else"     },
+	{ TOK_PRINT,   "print"    },
+	{ TOK_DEF  ,   "default"  },
+	{ TOK_MKDEP,   "makedep"  },
+	{ TOK_INCLUDE, "include"  },
+	{ TOK_IMPORT,  "import"   },
+	{ 0,            NULL      }
 };
 
 
@@ -632,7 +455,7 @@ bool rd_escape(struct rd_t *rd)
 	if(rd->ch != '\\')
 		return false;
 
-	if(strchr("tn'\" $", rd_ch(rd)) == NULL)
+	if(strchr("tn'\" ,$", rd_ch(rd)) == NULL)
 		loc_err(rd->loc, "Invalid escape character '\\%c'.", rd->ch);
 
 	rd_push(rd, '\\');
@@ -668,7 +491,8 @@ void rd_str(struct rd_t *rd)
  *   @rd: The reader.
  *   &returns: True if a variable string.
  */
-bool rd_var(struct rd_t *rd) {
+bool rd_var(struct rd_t *rd)
+{
 	if(rd->ch != '$')
 		return false;
 
@@ -677,22 +501,8 @@ bool rd_var(struct rd_t *rd) {
 		rd_buf(rd);
 
 		for(;;) {
-			if(rd->ch == '\\') {
-				char ch;
-
-				switch(rd_ch(rd)) {
-				case 't': ch = '\t'; break;
-				case 'n': ch = '\n'; break;
-				case '\'': ch = '\''; break;
-				case ' ': ch = ' '; break;
-				case '"': ch = '"'; break;
-				case '$': ch = '$'; break;
-				default: loc_err(rd->tloc, "Invalid escape character '\\%c'.", rd->ch);
-				}
-
-				rd_push(rd, ch);
-				rd_ch(rd);
-			}
+			if(rd->ch == '\\')
+				rd_escape(rd);
 			else if(rd->ch == '}')
 				break;
 			else
@@ -706,7 +516,7 @@ bool rd_var(struct rd_t *rd) {
 			rd_buf(rd);
 		while(ch_var(rd->ch));
 	}
-	else if(strchr("@^<~", rd->ch) != NULL)
+	else if(strchr("@^<*", rd->ch) != NULL)
 		rd_buf(rd);
 	else
 		loc_err(rd->loc, "Invalid variable name.");
@@ -727,22 +537,8 @@ bool rd_quote1(struct rd_t *rd)
 	rd_buf(rd);
 
 	for(;;) {
-		if(rd->ch == '\\') {
-			char ch;
-
-			switch(rd_ch(rd)) {
-			case 't': ch = '\t'; break;
-			case 'n': ch = '\n'; break;
-			case '\'': ch = '\''; break;
-			case ' ': ch = ' '; break;
-			case '"': ch = '"'; break;
-			case '$': ch = '$'; break;
-			default: loc_err(rd->loc, "Invalid escape character '\\%c'.", rd->ch);
-			}
-
-			rd_push(rd, ch);
-			rd_ch(rd);
-		}
+		if(rd->ch == '\\')
+			rd_escape(rd);
 		else if(rd->ch == '\'')
 			break;
 		else if((rd->ch == '\n') || (rd->ch < 0))
@@ -854,16 +650,16 @@ int rd_tok(struct rd_t *rd)
  *   @rd: The reader.
  *   &returns: The block.
  */
-struct block_t *rd_block(struct rd_t *rd)
+struct ast_block_t *rd_block(struct rd_t *rd)
 {
-	struct block_t *block;
-	struct stmt_t **stmt;
+	struct ast_block_t *block;
+	struct ast_stmt_t **stmt;
 
 	if(rd->tok != '{')
 		loc_err(rd->tloc, "Expected ';' or '{'.");
 
 	rd_tok(rd);
-	block = block_new();
+	block = ast_block_new();
 	stmt = &block->stmt;
 
 	while(rd->tok != '}') {
@@ -882,12 +678,12 @@ struct block_t *rd_block(struct rd_t *rd)
  *   @rd: The reader.
  *   &returns: The block.
  */
-struct block_t *rd_top(struct rd_t *rd)
+struct ast_block_t *rd_top(struct rd_t *rd)
 {
-	struct block_t *block;
-	struct stmt_t **stmt;
+	struct ast_block_t *block;
+	struct ast_stmt_t **stmt;
 
-	block = block_new();
+	block = ast_block_new();
 	stmt = &block->stmt;
 
 	while(rd->tok != TOK_EOF) {
@@ -903,7 +699,7 @@ struct block_t *rd_top(struct rd_t *rd)
  *   @rd: The reader.
  *   &returns: The statement.
  */
-struct stmt_t *rd_stmt(struct rd_t *rd)
+struct ast_stmt_t *rd_stmt(struct rd_t *rd)
 {
 	struct loc_t loc;
 	enum stmt_e tag;
@@ -916,6 +712,8 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 		lhs = rd_imm(rd);
 
 		if((rd->tok == '=') || (rd->tok == TOK_ADDEQ)) {
+			struct raw_t *id;
+			struct ast_bind_t *bind;
 			bool add = (rd->tok == TOK_ADDEQ);
 
 			if(imm_len(lhs) == 0)
@@ -923,17 +721,30 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			else if(imm_len(lhs) >= 2)
 				loc_err(rd->tloc, "Invalid variable name.");
 
-			rd_tok(rd);
-			rhs = rd_imm(rd);
-
-			tag = assign_v;
-			data.assign = assign_new(raw_dup(lhs->raw), rhs, add);
-
-			if(rd->tok != ';')
-				loc_err(rd->tloc, "Expected ';'.");
-
-			rd_tok(rd);
+			id = raw_dup(lhs->raw);
 			imm_delete(lhs);
+			rd_tok(rd);
+
+			if((rd->tok == TOK_STR) && (strcmp(rd->str, "env") == 0)) {
+				struct ast_block_t *block;
+
+				rd_tok(rd);
+				block = rd_block(rd);
+
+				bind = ast_bind_block(id, block, add);
+			}
+			else {
+				rhs = rd_imm(rd);
+				bind = ast_bind_val(id, rhs, add);
+
+				if(rd->tok != ';')
+					loc_err(rd->tloc, "Expected ';'.");
+
+				rd_tok(rd);
+			}
+
+			tag = ast_bind_v;
+			data.bind = bind;
 		}
 		else if(rd->tok == ':') {
 			loc = rd->tloc;
@@ -941,8 +752,10 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			rhs = rd_imm(rd);
 	
 			tag = syn_v;
-			data.syn = syn_new(lhs, rhs, loc);
+			data.syn = ast_rule_new(lhs, rhs, loc);
 			if(rd->tok == '{') {
+				data.syn->cmd = list_new((del_f)ast_cmd_delete);
+
 				rd_tok(rd);
 				while(rd->tok != '}') {
 					struct ast_cmd_t *proc;
@@ -994,33 +807,10 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 		else
 			loc_err(rd->tloc, "Expected assignment or rule.");
 	}
-	else if(rd->tok == TOK_DIR) {
-		struct raw_t *raw;
-		bool def = false;
-		struct block_t *block = NULL;
-
-		tag = dir_v;
-		rd_tok(rd);
-		raw = rd_raw(rd);
-
-		if(rd->tok == TOK_DEF) {
-			def = true;
-			rd_tok(rd);
-		}
-
-		if(rd->tok == '{')
-			block = rd_block(rd);
-		else if(rd->tok == ';')
-			rd_tok(rd);
-		else
-			loc_err(rd->tloc, "Expected ';' or '{'.");
-
-		data.dir = dir_new(def, raw, block);
-	}
 	else if(rd->tok == TOK_FOR) {
 		char *id;
 		struct imm_t *imm;
-		struct stmt_t *body;
+		struct ast_stmt_t *body;
 		struct loc_t loc = rd->tloc;
 
 		if(rd_tok(rd) != TOK_STR)
@@ -1045,6 +835,34 @@ struct stmt_t *rd_stmt(struct rd_t *rd)
 			loc_err(rd->tloc, "Expected ';'.");
 
 		rd_tok(rd);
+	}
+	else if(rd->tok == TOK_MKDEP) {
+		struct imm_t *imm;
+
+		rd_tok(rd);
+		imm = rd_imm(rd);
+		if(rd->tok != ';')
+			loc_err(rd->tloc, "Expected ';'.");
+
+		rd_tok(rd);
+		return ast_stmt_mkdep(ast_mkdep_new(imm, loc), loc);
+	}
+	else if((rd->tok == TOK_INCLUDE) || (rd->tok == TOK_IMPORT)) {
+		bool nest, opt;
+		struct imm_t *imm;
+
+		nest = (rd->tok == TOK_IMPORT);
+
+		rd_tok(rd);
+		if((opt = (rd->tok == '?')) == true) 
+			rd_tok(rd);
+
+		imm = rd_imm(rd);
+		if(rd->tok != ';')
+			loc_err(rd->tloc, "Expected ';'.");
+
+		rd_tok(rd);
+		return ast_stmt_inc(ast_inc_new(nest, opt, imm), loc);
 	}
 	else if(rd->tok == '{') {
 		tag = block_v;
