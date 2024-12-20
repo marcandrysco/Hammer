@@ -902,7 +902,7 @@ bool pat_len(const char *str, uint32_t *pre, uint32_t *post)
 
 struct rt_obj_t fn_pat(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 {
-	uint32_t len, min, spre, spost, slen, rpre, rpost, rlen;
+	uint32_t len, min, spre, spost, slen;
 	struct buf_t buf;
 	struct val_t *val, *ret, **iter;
 	char *pat, *repl;
@@ -910,16 +910,15 @@ struct rt_obj_t fn_pat(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 	if(cnt != 3)
 		loc_err(loc, "Function `.pat` requires 2 arguments.");
 	else if((args[0].tag != rt_val_v) || (args[1].tag != rt_val_v) || (args[2].tag != rt_val_v))
-		loc_err(loc, "Function `.sub` requires string values as arguments.");
+		loc_err(loc, "Function `.pat` requires string values as arguments.");
 	else if((val_len(args[1].data.val) != 1) || (val_len(args[2].data.val) != 1))
-		loc_err(loc, "Function `.sub` requires string values as arguments.");
+		loc_err(loc, "Function `.pat` requires string values as arguments.");
 
 	pat = args[1].data.val->str;
 	repl = args[2].data.val->str;
 	slen = strlen(pat);
-	rlen = strlen(repl);
 
-	if(!pat_len(pat, &spre, &spost) || !pat_len(repl, &rpre, &rpost))
+	if(!pat_len(pat, &spre, &spost))
 		loc_err(loc, "Function `.pat` requires patterns as arguments (must contain a single '%').");
 
 	iter = &ret;
@@ -928,10 +927,17 @@ struct rt_obj_t fn_pat(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 	for(val = args[0].data.val; val != NULL; val = val->next) {
 		len = strlen(val->str);
 		if((len > min) && (memcmp(val->str, pat, spre) == 0) && (strcmp(val->str + len - spost, pat + slen - spost) == 0)) {
+			char *find;
+
 			buf = buf_new(32);
-			buf_mem(&buf, repl, rpre);
-			buf_mem(&buf, val->str + spre, len - spost - spre);
-			buf_str(&buf, repl + rlen - rpost);
+
+			while((find = strchr(repl, '%')) != NULL) {
+				buf_mem(&buf, repl, find - repl);
+				buf_mem(&buf, val->str + spre, len - spost - spre);
+				repl = find + 1;
+			}
+
+			buf_str(&buf, repl);
 
 			*iter = val_new(val->spec, buf_done(&buf));
 		}
