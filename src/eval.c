@@ -260,7 +260,7 @@ __attribute__((noreturn)) void exp_err(struct exp_t *exp, const char *fmt, ...);
 
 
 /**
- * Get an expaneded a value.
+ * Get an expanded a value.
  *   @exp: The expander.
  *   &returns: The value.
  */
@@ -297,6 +297,55 @@ struct rt_obj_t exp_get(struct exp_t *exp)
 		obj = rt_obj_val(val_new(false, strdup(buf_done(&exp->buf))));
 	}
 
+	buf_delete(&exp->buf);
+	exp->buf = tmp;
+
+	return obj;
+}
+
+/**
+ * Get an expanded a value that may contain spaces.
+ *   @exp: The expander.
+ *   &returns: The value.
+ */
+struct rt_obj_t exp_val(struct exp_t *exp)
+{
+	char ch;
+	struct rt_obj_t obj;
+	struct buf_t tmp;
+	bool space = false;
+
+	tmp = exp->buf;
+	exp->buf = buf_new(32);
+
+	do {
+		if(space)
+			buf_ch(&exp->buf, ' ');
+
+		if(*exp->str == '$') {
+			obj = exp_var(exp);
+			if(*exp->str != '\0') {
+				exp_flat(exp, obj);
+				exp_str(exp);
+			}
+		}
+		else if(*exp->str == '.') {
+			exp_buf(exp);
+			while(ch_var(exp_ch(exp)))
+				exp_buf(exp);
+
+			if(*exp->str != '\0')
+				exp_str(exp);
+		}
+		else {
+			exp_str(exp);
+		}
+
+		space = isspace(exp_ch(exp));
+		ch = exp_trim(exp);
+	} while((ch != ')') && (ch != ',') && (ch != '\0'));
+
+	obj = rt_obj_val(val_new(false, strdup(buf_done(&exp->buf))));
 	buf_delete(&exp->buf);
 	exp->buf = tmp;
 
@@ -518,7 +567,7 @@ struct rt_obj_t exp_var(struct exp_t *exp)
 				exp_adv(exp);
 				if(exp_trim(exp) != ')') {
 					for(;;) {
-						args_add(&args, &cnt, exp_get(exp));
+						args_add(&args, &cnt, exp_val(exp));
 						ch = exp_trim(exp);
 						if(ch == ')')
 							break;
@@ -927,17 +976,18 @@ struct rt_obj_t fn_pat(struct rt_obj_t *args, uint32_t cnt, struct loc_t loc)
 	for(val = args[0].data.val; val != NULL; val = val->next) {
 		len = strlen(val->str);
 		if((len > min) && (memcmp(val->str, pat, spre) == 0) && (strcmp(val->str + len - spost, pat + slen - spost) == 0)) {
-			char *find;
+			char *find, *str;
 
+			str = repl;
 			buf = buf_new(32);
 
-			while((find = strchr(repl, '%')) != NULL) {
-				buf_mem(&buf, repl, find - repl);
+			while((find = strchr(str, '%')) != NULL) {
+				buf_mem(&buf, str, find - str);
 				buf_mem(&buf, val->str + spre, len - spost - spre);
-				repl = find + 1;
+				str = find + 1;
 			}
 
-			buf_str(&buf, repl);
+			buf_str(&buf, str);
 
 			*iter = val_new(val->spec, buf_done(&buf));
 		}
